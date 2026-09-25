@@ -6,6 +6,8 @@ Initial capabilities: tab discovery, CDP attach/detach, Console/Log capture, Net
 
 This project targets **developers using AI coding agents**. The intended loop is edit -> reload -> inspect Console/Network -> fix -> repeat, including Chrome-extension development.
 
+Client adapters are documented in `docs/CLIENTS.md`. Codex/Cursor-class local clients use stdio. Grok's current custom-MCP model requires a publicly reachable URL, so Grok support is a separate authenticated gateway rather than exposing Chrome Ops localhost ports.
+
 Network observations are redacted before they cross the extension boundary: Cookie, Set-Cookie, Authorization, proxy authorization, and cookie value fields are replaced with `[REDACTED]`.
 
 ## Development

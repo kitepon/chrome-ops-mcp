@@ -10,6 +10,9 @@
     "start": "node dist/index.js",
     "host": "node dist/host.js",
     "setup:windows": "pwsh -NoProfile -File scripts/setup-windows.ps1",
+    "doctor": "pwsh -NoProfile -File scripts/doctor.ps1",
+    "register:codex": "pwsh -NoProfile -File scripts/register-codex.ps1",
+    "register:cursor": "pwsh -NoProfile -File scripts/register-cursor.ps1",
     "test": "npm run build",
     "test:smoke": "node test/smoke.mjs",
     "test:devtools": "node test/devtools-smoke.mjs"
