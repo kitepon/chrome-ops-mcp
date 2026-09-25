@@ -1,0 +1,24 @@
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const transport = new StdioClientTransport({ command: process.execPath, args: ["dist/index.js"] });
+const client = new Client({ name: "chrome-ops-devtools-smoke", version: "0.1.0" });
+await client.connect(transport);
+await new Promise(r => setTimeout(r, 2500));
+const call = async (name, args={}) => client.callTool({name, arguments:args});
+const tabs = await call("tabs_list");
+const list = JSON.parse(tabs.content[0].text);
+const tab = list.find(t => t.url?.startsWith("http://") || t.url?.startsWith("https://"));
+if (!tab) throw new Error("No HTTP(S) tab available for smoke test");
+console.log("target", JSON.stringify(tab));
+console.log("attach", JSON.stringify((await call("devtools_attach", {tabId:tab.id})).content));
+console.log("evaluate", JSON.stringify((await call("runtime_evaluate", {tabId:tab.id, expression:"({title:document.title,url:location.href,readyState:document.readyState})"})).content));
+console.log("reload", JSON.stringify((await call("page_reload", {tabId:tab.id})).content));
+await new Promise(r => setTimeout(r, 2000));
+console.log("console", JSON.stringify((await call("console_read", {tabId:tab.id})).content));
+const network = await call("network_read", {tabId:tab.id,limit:20});
+const networkText = network.content[0].text;
+if (/nc_token|nc_session_id/.test(networkText)) throw new Error("Sensitive cookie material leaked from network_read");
+console.log("network-redaction", networkText.includes("[REDACTED]") ? "ok" : "no-sensitive-fields-observed");
+console.log("detach", JSON.stringify((await call("devtools_detach", {tabId:tab.id})).content));
+await client.close();

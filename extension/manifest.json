@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome Ops MCP Bridge",
+  "version": "0.1.1",
+  "description": "Expose Chrome management and DevTools operations to a local MCP server.",
+  "permissions": ["debugger", "management", "tabs", "contentSettings", "privacy"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "service-worker.js" },
+  "action": { "default_title": "Chrome Ops MCP" }
+}
