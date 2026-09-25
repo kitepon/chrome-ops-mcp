@@ -1,10 +1,12 @@
 {
   "name": "chrome-ops-mcp",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "MCP server for Chrome DevTools, extension management, and browser settings via a local Chrome extension.",
   "type": "module",
   "main": "dist/index.js",
-  "bin": { "chrome-ops-mcp": "dist/index.js" },
+  "bin": { "chrome-ops-mcp": "bin/chrome-ops-mcp.js" },
+  "files": ["bin/","dist/","extension/","helper/","scripts/","docs/","README.md","SECURITY.md","LICENSE"],
+  "engines": { "node": ">=22" },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
@@ -18,8 +20,8 @@
     "test:smoke": "node test/smoke.mjs",
     "test:devtools": "node test/devtools-smoke.mjs"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["mcp","chrome","devtools","codex","cursor","grok","developer-tools"],
+  "author": "kitepon.dev",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
