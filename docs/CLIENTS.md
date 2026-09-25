@@ -10,12 +10,10 @@ Chrome Ops keeps client-specific installation outside the core runtime.
 
 These clients launch `dist/index.js`; that short-lived stdio process talks to the persistent Chrome Ops Host on `127.0.0.1:32146`.
 
-## Grok
+## Grok Build
 
-As of 2026-09, grok.com Custom MCP connectors require an MCP server URL reachable from the public internet. localhost/private-network URLs are not accepted. Therefore Grok must not be treated like a local stdio client.
+Grok Build supports local stdio MCP servers natively. Register Chrome Ops with Grok's own `grok mcp add` command. Grok Build also supports user/project TOML MCP configuration and compatibility imports from Cursor/Claude MCP files.
 
-Planned topology:
+Topology: `Grok Build -> Chrome Ops stdio MCP -> persistent Host -> Chrome`.
 
-`Grok -> authenticated HTTPS MCP gateway -> local Chrome Ops gateway -> persistent Host -> Chrome`
-
-The public gateway is optional and disabled by default. It must authenticate every connection and expose only Chrome Ops MCP methods; it must never expose the Host WebSocket ports directly.
+This support is for the local **Grok Build CLI**, not the grok.com Custom MCP connector product.

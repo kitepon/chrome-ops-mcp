@@ -11,7 +11,7 @@ $result=[ordered]@{
   clients=[ordered]@{
     codex=[ordered]@{detected=[bool](Cmd 'codex');configExists=(Test-Path $codex);config=$codex}
     cursor=[ordered]@{detected=([bool](Cmd 'cursor') -or [bool](Cmd 'agent') -or (Test-Path $cursor));configExists=(Test-Path $cursor);config=$cursor}
-    grok=[ordered]@{mode='remote-gateway';localStdio=$false;note='grok.com Custom MCP requires a publicly reachable MCP URL'}
+    grok=[ordered]@{detected=[bool](Cmd 'grok');mode='local-stdio';config=(Join-Path $HOME '.grok\config.toml')}
   }
 }
 $result|ConvertTo-Json -Depth 8
