@@ -100,7 +100,8 @@ async function dispatch(method, p) {
         const digest = await crypto.subtle.digest("SHA-256", bytes);
         return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
       };
-      return { preparePage:true, sourceHash:await hash("service-worker.js"), manifestHash:await hash("manifest.json") };
+      // getURL reads the files on disk, which change before the running worker is reloaded; the in-memory manifest does not.
+      return { preparePage:true, sourceHash:await hash("service-worker.js"), manifestHash:await hash("manifest.json"), runningVersion:chrome.runtime.getManifest().version };
     }
     case "extensions.preparePage": {
       if (chrome.extension.inIncognitoContext) throw new Error("Chrome Ops Bridge is running in an incognito profile");

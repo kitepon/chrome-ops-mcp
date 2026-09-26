@@ -138,12 +138,13 @@ async function updateBridge() {
   if (!status.connected) return { connected: false, bridgeUpdated: false };
   const sourceHash = createHash("sha256").update(readFileSync(resolve(root, "extension/service-worker.js"))).digest("hex");
   const manifestHash = createHash("sha256").update(readFileSync(resolve(root, "extension/manifest.json"))).digest("hex");
+  const version = JSON.parse(readFileSync(resolve(root, "extension/manifest.json"), "utf8")).version;
   let capabilities;
   try { capabilities = await hostCall("extensions.capabilities"); }
   catch (error) {
     if (error.message !== "Unknown method: extensions.capabilities") throw error;
   }
-  if (capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash) {
+  if (capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash && capabilities.runningVersion === version) {
     return { connected: true, bridgeUpdated: false };
   }
   const extensions = await hostCall("extensions.list");
@@ -169,7 +170,7 @@ async function updateBridge() {
     if (!current.connected || current.bridgeSession === status.bridgeSession) return false;
     try {
       const currentCapabilities = await hostCall("extensions.capabilities");
-      return currentCapabilities?.preparePage === true && currentCapabilities.sourceHash === sourceHash && currentCapabilities.manifestHash === manifestHash;
+      return currentCapabilities?.preparePage === true && currentCapabilities.sourceHash === sourceHash && currentCapabilities.manifestHash === manifestHash && currentCapabilities.runningVersion === version;
     } catch { return false; }
   }, "updated Chrome Ops Bridge to reconnect with the expected source", 12000);
   return { connected: true, bridgeUpdated: true };

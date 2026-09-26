@@ -58,7 +58,11 @@ struct AXNode {
 }
 
 // Bound a single snapshot. Do not dump arbitrary browser tabs or silently truncate a tree.
-func snapshot(_ root: AXUIElement, descendIntoWeb: Bool = true) throws -> [AXNode] {
+// The open panel's file list can hold hundreds of rows. Picker controls never live inside it, and walking it
+// on every poll made Load unpacked take over a minute.
+let pickerFileListRoles: Set<String> = ["AXOutline", "AXBrowser", "AXTable", "AXList"]
+
+func snapshot(_ root: AXUIElement, descendIntoWeb: Bool = true, skipping skipped: Set<String> = []) throws -> [AXNode] {
     var nodes: [AXNode] = []
     func visit(_ element: AXUIElement, parent: Int?, depth: Int) throws {
         guard nodes.count < 12000, depth < 60 else { throw HelperFailure("Accessibility tree exceeded the inspection budget") }
@@ -69,6 +73,7 @@ func snapshot(_ root: AXUIElement, descendIntoWeb: Bool = true) throws -> [AXNod
                             value: string(element, "AXValue"), detail: string(element, "AXDescription"),
                             identifier: string(element, "AXIdentifier")))
         if role == "AXWebArea" && !descendIntoWeb { return }
+        if skipped.contains(role) { return }
         for child in elements(element) { try visit(child, parent: index, depth: depth + 1) }
     }
     try visit(root, parent: nil, depth: 0)
@@ -183,7 +188,7 @@ func pickerHasFocus(_ page: ExtensionsPage) throws -> Bool {
     // NSOpenPanel and its Go to Folder sheet become AXFocusedWindow on macOS.
     // Accept only sheets belonging to this exact, already-validated directory picker.
     guard let panel = try openPanel(page) else { return false }
-    return try snapshot(panel.element).contains { $0.role == "AXSheet" && CFEqual(focused, $0.element) }
+    return try snapshot(panel.element, skipping: pickerFileListRoles).contains { $0.role == "AXSheet" && CFEqual(focused, $0.element) }
 }
 
 func focusedApplicationPID() -> pid_t? {
@@ -242,15 +247,34 @@ func pickerKey(_ page: ExtensionsPage, field: AXNode, goToFolder: Bool = false) 
 }
 
 func openPanel(_ page: ExtensionsPage) throws -> AXNode? {
-    let matches = try snapshot(page.window).filter { $0.role == "AXSheet" && $0.identifier == "open-panel" }
+    let matches = try snapshot(page.window, skipping: pickerFileListRoles).filter { $0.role == "AXSheet" && $0.identifier == "open-panel" }
     guard matches.count <= 1 else { throw HelperFailure("Ambiguous extension directory picker") }
     return matches.first
 }
 
 func goToFolderSheet(_ panel: AXNode) throws -> AXNode? {
-    let matches = try snapshot(panel.element).filter { $0.role == "AXSheet" && $0.identifier == "GoToWindow" }
+    let matches = try snapshot(panel.element, skipping: pickerFileListRoles).filter { $0.role == "AXSheet" && $0.identifier == "GoToWindow" }
     guard matches.count <= 1 else { throw HelperFailure("Ambiguous Go to Folder sheet") }
     return matches.first
+}
+
+// The Go to Folder path field. It sits in a GoToWindow sheet of the panel on some macOS builds; on others
+// (seen on macOS 27.0) it is not reachable from the panel tree and is only the focused element of the picker process.
+func goToFolderField(_ panel: AXNode) throws -> AXNode? {
+    if let sheet = try goToFolderSheet(panel) {
+        return try unique(snapshot(sheet.element, skipping: pickerFileListRoles), "Go to Folder path field") {
+            $0.role == "AXTextField" && $0.identifier == "PathTextField"
+        }
+    }
+    guard let raw = attribute(AXUIElementCreateSystemWide(), "AXFocusedUIElement"),
+          CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+    let focused = unsafeDowncast(raw, to: AXUIElement.self)
+    var panelPID: pid_t = 0, focusedPID: pid_t = 0
+    guard string(focused, "AXRole") == "AXTextField", string(focused, "AXIdentifier") == "PathTextField",
+          AXUIElementGetPid(panel.element, &panelPID) == .success,
+          AXUIElementGetPid(focused, &focusedPID) == .success, focusedPID == panelPID else { return nil }
+    return AXNode(element: focused, parent: nil, role: "AXTextField", subrole: string(focused, "AXSubrole"),
+                  title: "", value: "", detail: "", identifier: "PathTextField")
 }
 
 func load(_ request: Request) throws -> [String: Any] {
@@ -265,7 +289,7 @@ func load(_ request: Request) throws -> [String: Any] {
     try focus(page)
     try press(button)
     let panel = try waitFor("extension directory picker") { try openPanel(page) }
-    let panelNodes = try snapshot(panel.element)
+    let panelNodes = try snapshot(panel.element, skipping: pickerFileListRoles)
     guard panelNodes.contains(where: { $0.labels.contains(where: { $0.contains("拡張機能のディレクトリ") || $0.localizedCaseInsensitiveContains("extension directory") }) }) else {
         throw HelperFailure("The open panel is not an extension directory picker")
     }
@@ -275,18 +299,15 @@ func load(_ request: Request) throws -> [String: Any] {
         $0.role == "AXTextField" && $0.identifier == "Search"
     }
     try pickerKey(page, field: search, goToFolder: true)
-    let goSheet = try waitFor("Go to Folder sheet") { try goToFolderSheet(panel) }
-    let field = try unique(snapshot(goSheet.element), "Go to Folder path field") {
-        $0.role == "AXTextField" && $0.identifier == "PathTextField"
-    }
+    let field = try waitFor("Go to Folder path field") { try goToFolderField(panel) }
     let enteredPath = request.value + "/"
     guard AXUIElementSetAttributeValue(field.element, "AXValue" as CFString, enteredPath as CFString) == .success,
           string(field.element, "AXValue") == enteredPath else { throw HelperFailure("Could not set the validated extension directory") }
     try pickerKey(page, field: field)
     _ = try waitFor("Go to Folder completion") { () -> Bool? in
-        try goToFolderSheet(panel) == nil ? true : nil
+        try goToFolderField(panel) == nil ? true : nil
     }
-    let choose = try unique(snapshot(panel.element), "directory selection button") {
+    let choose = try unique(snapshot(panel.element, skipping: pickerFileListRoles), "directory selection button") {
         $0.role == "AXButton" && $0.identifier == "OKButton"
     }
     try press(choose)

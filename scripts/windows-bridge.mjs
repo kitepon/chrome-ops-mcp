@@ -44,10 +44,11 @@ export async function updateBridge() {
   if (!status.connected) return { connected: false, bridgeUpdated: false };
   const sourceHash = sha256(readFileSync(resolve(root, "extension/service-worker.js")));
   const manifestHash = sha256(readFileSync(resolve(root, "extension/manifest.json")));
+  const version = JSON.parse(readFileSync(resolve(root, "extension/manifest.json"), "utf8")).version;
   const current = async () => {
     try {
       const capabilities = await hostCall("extensions.capabilities");
-      return capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash;
+      return capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash && capabilities.runningVersion === version;
     } catch (error) {
       if (error.message === "Unknown method: extensions.capabilities") return false;
       throw error;
