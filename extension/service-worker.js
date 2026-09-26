@@ -49,6 +49,9 @@ function respond(socket, id, ok, result, error) { if (socket.readyState === WebS
 chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);
 chrome.action.onClicked.addListener(connect);
+// While the Host is down the worker goes idle and its retry timer dies with it; an alarm wakes it to reconnect.
+chrome.alarms.create("reconnect", { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === "reconnect") connect(); });
 connect();
 
 chrome.debugger.onDetach.addListener(source => { if (source.tabId != null) attached.delete(source.tabId); });

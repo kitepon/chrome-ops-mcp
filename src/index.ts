@@ -19,7 +19,8 @@ const bridgeSession=async()=>{
   }
   return status.bridgeSession;
 };
-const preparedMacPage=async(session:string)=>{
+// macOS and Windows helpers both act on a management tab that the Bridge opens and focuses first.
+const preparedPage=async(session:string)=>{
   const prepared=await bridge.call("extensions.preparePage");
   if(!prepared||typeof prepared!=="object"||!("token" in prepared)||
      typeof prepared.token!=="string"||!("tabId" in prepared)||typeof prepared.tabId!=="number"){
@@ -28,9 +29,9 @@ const preparedMacPage=async(session:string)=>{
   if(await bridgeSession()!==session) throw new Error("Chrome Ops Bridge profile changed before the developer operation");
   return prepared.token;
 };
-const macDeveloperOperation=async(operation:"reload"|"errors"|"remove",id:string)=>{
+const developerOperation=async(operation:"reload"|"errors"|"remove",id:string)=>{
   const session=await bridgeSession();
-  const token=await preparedMacPage(session);
+  const token=await preparedPage(session);
   const action=await helper(operation,id,token);
   if(await bridgeSession()!==session) throw new Error("Chrome Ops Bridge profile changed during the developer operation");
   return {action,session};
@@ -55,7 +56,6 @@ proxy("extension_get", "Get metadata for one installed extension, including inst
 proxy("extension_set_enabled", "Enable or disable an installed extension. Chrome may require a user gesture/confirmation.", { id: z.string(), enabled: z.boolean() }, "extensions.setEnabled");
 proxy("extension_uninstall", "Request uninstall of another extension. Chrome always presents confirmation for another extension.", { id: z.string() }, "extensions.uninstall");
 server.tool("extension_dev_load", "Load an unpacked Chrome extension directory through the restricted native helper. The directory must contain manifest.json.", { path:z.string().min(1) }, async ({path})=>{
-  if(process.platform!=="darwin") return text(await helper("load",path));
   const directory=await realpath(path);
   if(!(await stat(directory)).isDirectory()||!(await stat(join(directory,"manifest.json"))).isFile()){
     throw new Error("Load path must be a directory containing manifest.json");
@@ -67,16 +67,20 @@ server.tool("extension_dev_load", "Load an unpacked Chrome extension directory t
   };
   const originalSession=await bridgeSession();
   const before=new Set((await inventory()).map(entry=>entry?.id).filter((id):id is string=>typeof id==="string"));
-  const token=await preparedMacPage(originalSession);
+  const token=await preparedPage(originalSession);
   const action=await helper("load",directory,token);
-  if(!action||typeof action!=="object"||!("data" in action)||!action.data||
-     typeof action.data!=="object"||!("extensionId" in action.data)||typeof action.data.extensionId!=="string"){
-    throw new Error("Native helper did not identify the newly loaded extension");
+  if(!action||typeof action!=="object"||!("data" in action)||!action.data||typeof action.data!=="object"){
+    throw new Error("Native helper did not report the Load unpacked result");
   }
-  const id=action.data.extensionId;
-  if(before.has(id)) throw new Error(`Chrome reported an existing extension ${id} as a new load`);
+  // The macOS helper reads the new id from the page; on Windows it is the one new development extension.
+  const reported="extensionId" in action.data&&typeof action.data.extensionId==="string"?action.data.extensionId:null;
+  if(process.platform==="darwin"&&!reported) throw new Error("Native helper did not identify the newly loaded extension");
+  if(reported&&before.has(reported)) throw new Error(`Chrome reported an existing extension ${reported} as a new load`);
   for(let i=0;i<20;i++){
-    const found=(await inventory()).find(entry=>entry?.id===id);
+    const added=(await inventory()).filter(entry=>typeof entry?.id==="string"&&!before.has(entry.id));
+    if(!reported&&added.length>1) throw new Error("More than one extension appeared during Load unpacked");
+    const found=reported?added.find(entry=>entry.id===reported):added[0];
+    const id=found?.id;
     if(found){
       if(await bridgeSession()!==originalSession) throw new Error("Chrome Ops Bridge profile changed during Load unpacked");
       if(found.installType!=="development") throw new Error(`Loaded extension ${id} is not an unpacked development extension`);
@@ -84,19 +88,19 @@ server.tool("extension_dev_load", "Load an unpacked Chrome extension directory t
     }
     await new Promise(resolve=>setTimeout(resolve,100));
   }
-  throw new Error(`Chrome management did not report the loaded extension ${id}`);
+  throw new Error(reported?`Chrome management did not report the loaded extension ${reported}`:"Chrome management did not report a newly loaded extension");
 });
-server.tool("extension_dev_reload", "Reload an installed unpacked extension by exact extension id through Chrome's extension-management UI.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(process.platform==="darwin"?(await macDeveloperOperation("reload",id)).action:await helper("reload",id)));
-server.tool("extension_dev_errors", "Open the Errors view for an unpacked extension by exact extension id.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(process.platform==="darwin"?(await macDeveloperOperation("errors",id)).action:await helper("errors",id)));
+server.tool("extension_dev_reload", "Reload an installed unpacked extension by exact extension id through Chrome's extension-management UI.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text((await developerOperation("reload",id)).action));
+server.tool("extension_dev_errors", "Open the Errors view for an unpacked extension by exact extension id.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text((await developerOperation("errors",id)).action));
 server.tool("extension_dev_remove", "Remove an unpacked extension by exact extension id and verify it disappeared from chrome.management.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>{
-  const operation=process.platform==="darwin"?await macDeveloperOperation("remove",id):{action:await helper("remove",id),session:null};
+  const operation=await developerOperation("remove",id);
   const action=operation.action; let removed=false;
   for(let i=0;i<20;i++){
     await new Promise(r=>setTimeout(r,100));
-    if(operation.session!==null&&await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed before remove verification");
+    if(await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed before remove verification");
     const inventory=await bridge.call("extensions.list");
     if(!Array.isArray(inventory)) throw new Error("Chrome extension inventory is unavailable after remove confirmation");
-    if(operation.session!==null&&await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed during remove verification");
+    if(await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed during remove verification");
     if(!inventory.some(entry=>entry && typeof entry==="object" && entry.id===id)){removed=true;break}
   }
   if(!removed) throw new Error(`Chrome still reports extension ${id} after remove confirmation`);
