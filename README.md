@@ -22,9 +22,33 @@ npm start
 
 On Windows, the current developer baseline is PowerShell 7+. `npm run setup:windows` builds the project and registers **Chrome Ops Host** as a per-user logon scheduled task. The Host owns the persistent Chrome connection; short-lived stdio MCP processes connect to it on localhost. It does not modify an MCP client's configuration unless that client is explicitly supported/detected.
 
+On macOS, `npm run setup:macos` builds the Swift helper and installs a per-user LaunchAgent for the same Host. When an unpacked Bridge is already connected, setup also updates it from this installation and confirms that the new worker reconnects. The command is safe to repeat; `npm run uninstall:macos` removes the LaunchAgent and stops its Host. Neither command removes Chrome's bridge extension or client registrations. The Host logs to `~/Library/Logs/ChromeOps/`.
+
+## Quick start (macOS alpha)
+
+Requirements: macOS with the Swift toolchain (`swift`), Chrome, Node.js 22+, and Chrome Developer mode. Give Accessibility permission to the app that runs Chrome Ops when macOS requests it. `npm run doctor` reports that authorization; the Swift helper does not use Screen Recording APIs.
+
+```sh
+git clone https://github.com/kitepon/chrome-ops-mcp.git
+cd chrome-ops-mcp
+npm ci
+npm run setup:macos
+npm run doctor
+```
+
+Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this package's `extension/` directory. Keep Chrome open for developer-extension operations. Check that `npm run doctor` reports `host.connected: true` after the bridge connects. Register each installed MCP client you intend to use:
+
+```sh
+npm run register:codex
+npm run register:cursor
+npm run register:grok
+```
+
+Each registration command verifies the Host and preserves a backup before changing an existing client configuration. Restart or reload the client if it does not discover the new MCP server immediately. `npm run doctor` reports the LaunchAgent, Host, native helper permission, and client registration state. Load the Bridge once in the intended Chrome profile. If multiple Bridge profiles connect at the same time, Chrome Ops reports the ambiguity and waits for one profile to remain connected.
+
 ## Quick start (Windows alpha)
 
-Requirements: Windows 11, Chrome, Node.js 22+, PowerShell 7+, and Chrome Developer mode. The v0.1 helper is validated with Japanese and English Chrome UI labels.
+Requirements: Windows 11, Chrome, Node.js 22+, PowerShell 7+, and Chrome Developer mode. The Windows helper is validated with Japanese and English Chrome UI labels.
 
 ```powershell
 npm install
@@ -65,15 +89,18 @@ Chrome 116+ keeps extension service workers alive when WebSocket traffic is acti
 - Network credential redaction
 - Persistent Host survives individual stdio MCP client lifetimes
 - Windows helper: Load unpacked, exact-ID reload, Errors extraction, remove + postcondition verification
+- macOS helper: Load unpacked, exact-ID reload, Errors extraction, remove + postcondition verification on a disposable fixture
+- macOS LaunchAgent: setup, repeat setup, restart, uninstall, and reinstall with stdio MCP reconnection
 
 ## Known boundary
 
-Chrome's public `chrome.management` extension API can inspect installed extensions but does not expose arbitrary unpacked-directory loading or another extension's developer reload action. Chrome Ops uses a deliberately narrow PowerShell 7 + Windows UI Automation helper for those developer-mode operations. The helper is not a generic shell/UI automation API.
+Chrome's public `chrome.management` extension API can inspect installed extensions but does not expose arbitrary unpacked-directory loading or another extension's developer reload action. Chrome Ops uses deliberately narrow PowerShell 7 + Windows UI Automation and Swift + macOS Accessibility helpers for those developer-mode operations. The helpers are not generic shell/UI automation APIs.
 
-### v0.1 alpha limitations
+### v0.2 alpha limitations
 
-- Windows is the only helper implementation today.
 - Chrome Developer mode must already be enabled for unpacked-extension operations.
 - Developer-management UI automation is currently validated against Japanese and English Chrome labels; other UI languages are not yet guaranteed.
-- The Chrome Ops extension itself must be loaded manually once during initial setup. Future packaging can automate/bootstrap this separately.
+- The Chrome Ops extension itself must be loaded manually once during initial setup. Subsequent `setup:macos` runs update an already connected unpacked Bridge.
 - Client registration adapters currently cover Codex, Cursor, and Grok Build. See `docs/CLIENTS.md`.
+- On macOS, each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API. The Windows helper contract remains unchanged.
+- macOS was verified on one Mac and Chrome installation. A login/logout cycle, revoked Screen Recording permission, and a fresh Windows machine were not tested in this macOS pass.

@@ -4,7 +4,7 @@ Chrome Ops targets developer workflows that ordinary browser automation cannot c
 
 Before a pull request:
 
-```powershell
+```sh
 npm ci
 npm test
 npm audit --omit=dev

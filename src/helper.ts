@@ -3,13 +3,21 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const script = resolve(here, "../helper/windows/chrome-ops-helper.ps1");
+const platform = process.platform;
 
-export function helper(operation: "load"|"reload"|"errors"|"remove", value: string): Promise<unknown> {
-  const args = ["-NoProfile","-ExecutionPolicy","Bypass","-File",script,"-Operation",operation];
-  if (operation === "load") args.push("-Path", value); else args.push("-ExtensionId", value);
-  return new Promise((resolvePromise,reject) => {
-    const child=spawn("pwsh",args,{windowsHide:true}); let out="",err="";
+export function helper(operation: "load"|"reload"|"errors"|"remove", value: string, pageToken?: string): Promise<unknown> {
+  if (platform !== "darwin" && platform !== "win32") {
+    throw new Error(`Unsupported helper platform: ${platform}`);
+  }
+  const command = platform === "darwin"
+    ? resolve(here, "../helper/macos/.build/release/chrome-ops-helper")
+    : "pwsh";
+  const args = platform === "darwin"
+    ? [operation, value, ...(pageToken ? [pageToken] : [])]
+    : ["-NoProfile","-ExecutionPolicy","Bypass","-File",resolve(here, "../helper/windows/chrome-ops-helper.ps1"),"-Operation",operation, ...(operation === "load" ? ["-Path", value] : ["-ExtensionId", value])];
+
+  return new Promise((resolvePromise,reject)=>{
+    const child=spawn(command,args,{windowsHide:true}); let out="",err="";
     child.stdout.on("data",d=>out+=d); child.stderr.on("data",d=>err+=d);
     child.on("error",reject);
     child.on("close",code=>{

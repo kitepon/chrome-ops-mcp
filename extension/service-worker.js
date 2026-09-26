@@ -12,7 +12,8 @@ function push(map, id, value, max = 2000) {
   if (a.length > max) a.splice(0, a.length - max); map.set(id, a);
 }
 function sanitize(value, key = "") {
-  const sensitive = /^(cookie|set-cookie|authorization|proxy-authorization|value)$/i;
+  // CDPは認証ヘッダーをオブジェクトだけでなく生のヘッダー文字列にも重複して入れる。
+  const sensitive = /^(cookie|set-cookie|authorization|proxy-authorization|value|headersText|requestHeadersText|cookieLine)$/i;
   if (sensitive.test(key)) return "[REDACTED]";
   if (Array.isArray(value)) return value.map(v => sanitize(v));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k,v]) => [k, sanitize(v,k)]));
@@ -20,24 +21,30 @@ function sanitize(value, key = "") {
 }
 function connect() {
   clearTimeout(retry);
-  ws = new WebSocket(ENDPOINT);
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type:"hello", role:"chrome-extension", protocol:1 }));
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+  const socket = new WebSocket(ENDPOINT);
+  ws = socket;
+  socket.onopen = () => {
+    socket.send(JSON.stringify({ type:"hello", role:"chrome-extension", protocol:1 }));
     clearInterval(heartbeat);
     heartbeat = setInterval(() => {
-      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type:"event", event:"heartbeat", data:{ ts:Date.now() } }));
+      if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type:"event", event:"heartbeat", data:{ ts:Date.now() } }));
     }, 20000);
   };
-  ws.onmessage = async e => {
+  socket.onmessage = async e => {
     let msg; try { msg = JSON.parse(e.data); } catch { return; }
     if (msg.type !== "request") return;
-    try { respond(msg.id, true, await dispatch(msg.method, msg.params || {})); }
-    catch (e) { respond(msg.id, false, undefined, e?.message || String(e)); }
+    try { respond(socket, msg.id, true, await dispatch(msg.method, msg.params || {})); }
+    catch (e) { respond(socket, msg.id, false, undefined, e?.message || String(e)); }
   };
-  ws.onclose = () => { clearInterval(heartbeat); retry = setTimeout(connect, 1500); };
-  ws.onerror = () => ws.close();
+  socket.onclose = () => {
+    if (ws !== socket) return;
+    clearInterval(heartbeat);
+    retry = setTimeout(connect, 1500);
+  };
+  socket.onerror = () => socket.close();
 }
-function respond(id, ok, result, error) { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ id, type:"response", ok, result, error })); }
+function respond(socket, id, ok, result, error) { if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id, type:"response", ok, result, error })); }
 
 chrome.runtime.onStartup.addListener(connect);
 chrome.runtime.onInstalled.addListener(connect);
@@ -84,6 +91,40 @@ async function dispatch(method, p) {
     case "devtools.reload": await ensureAttached(p.tabId); await chrome.debugger.sendCommand({tabId:p.tabId}, "Page.reload", {ignoreCache:p.ignoreCache??false}); return {reloading:true};
     case "extensions.list": return chrome.management.getAll();
     case "extensions.get": return chrome.management.get(p.id);
+    case "extensions.capabilities": {
+      const hash = async path => {
+        const bytes = await (await fetch(chrome.runtime.getURL(path))).arrayBuffer();
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+      };
+      return { preparePage:true, sourceHash:await hash("service-worker.js"), manifestHash:await hash("manifest.json") };
+    }
+    case "extensions.preparePage": {
+      if (chrome.extension.inIncognitoContext) throw new Error("Chrome Ops Bridge is running in an incognito profile");
+      const windows = (await chrome.windows.getAll({ windowTypes:["normal"] })).filter(w => !w.incognito);
+      const last = windows.length ? await chrome.windows.getLastFocused({ windowTypes:["normal"] }) : null;
+      const target = last && !last.incognito && windows.some(w => w.id === last.id)
+        ? last : windows.length === 1 ? windows[0] : null;
+      if (windows.length && !target) throw new Error("The Bridge profile has multiple Chrome windows and no unique last-focused normal window");
+      const token = crypto.randomUUID();
+      const url = `chrome://extensions/?chromeOps=${token}`;
+      let windowId, tab;
+      if (target) {
+        windowId = target.id;
+        tab = await chrome.tabs.create({ windowId, url, active:true });
+      } else {
+        const created = await chrome.windows.create({ url, focused:true, incognito:false });
+        windowId = created.id;
+        const matches = await chrome.tabs.query({ windowId, active:true });
+        if (matches.length !== 1) throw new Error("Chrome did not return one extension management tab");
+        tab = matches[0];
+      }
+      if (windowId == null) throw new Error("Chrome did not return a normal window for extension management");
+      if (tab.id == null) throw new Error("Chrome did not return the extension management tab ID");
+      try { await chrome.windows.update(windowId, { focused:true }); }
+      catch (error) { await chrome.tabs.remove(tab.id); throw error; }
+      return { token, tabId:tab.id };
+    }
     case "extensions.setEnabled": await chrome.management.setEnabled(p.id,p.enabled); return chrome.management.get(p.id);
     case "extensions.uninstall": await chrome.management.uninstall(p.id,{showConfirmDialog:true}); return {requested:true};
     case "settings.contentGet": { const api=chrome.contentSettings[p.kind]; if(!api) throw new Error(`Unsupported setting: ${p.kind}`); return api.get({primaryUrl:p.primaryUrl}); }

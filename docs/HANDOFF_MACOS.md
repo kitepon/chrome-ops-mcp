@@ -1,5 +1,7 @@
 # macOS implementation handoff
 
+> Historical implementation brief. For current installation and limitations, see [README](../README.md).
+
 This document is the execution brief for the macOS task. It has **two strictly ordered phases**. Phase 1 establishes Chat On Steroids (CoS) access to the Mac. Phase 2 implements Chrome Ops macOS support.
 
 ## Mandatory phase gate

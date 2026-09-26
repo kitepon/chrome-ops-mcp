@@ -28,3 +28,5 @@ Network secrets are redacted before crossing from the extension to the MCP proce
 `edit -> extension_dev_reload -> extension_dev_errors -> console/network inspection -> fix -> repeat`
 
 Initial `Load unpacked` is a helper operation because Chrome's public extension APIs do not expose arbitrary unpacked-directory loading.
+
+On macOS, the Bridge first prepares a fixed management tab in its own Chrome profile. The helper matches that exact tab before using developer controls. The installer has one internal, fixed Bridge-update action for an already connected unpacked Bridge; it is not an MCP tool and does not accept arbitrary URLs or input commands.

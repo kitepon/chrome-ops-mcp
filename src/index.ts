@@ -1,14 +1,40 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { ChromeBridgeClient } from "./bridge.js";
 import { helper } from "./helper.js";
 
 const bridge = new ChromeBridgeClient();
-const server = new McpServer({ name: "chrome-ops-mcp", version: "0.1.0" });
+const server = new McpServer({ name: "chrome-ops-mcp", version: "0.2.0-alpha.0" });
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const proxy = (name: string, description: string, schema: Record<string, z.ZodTypeAny>, method = name) =>
   server.tool(name, description, schema, async args => text(await bridge.call(method, args)));
+const bridgeSession=async()=>{
+  const status=await bridge.call("host.status");
+  if(!status||typeof status!=="object"||!("connected" in status)||status.connected!==true||
+     !("bridgeSession" in status)||typeof status.bridgeSession!=="string"){
+    throw new Error("A unique Chrome Ops Bridge profile is required for developer operations");
+  }
+  return status.bridgeSession;
+};
+const preparedMacPage=async(session:string)=>{
+  const prepared=await bridge.call("extensions.preparePage");
+  if(!prepared||typeof prepared!=="object"||!("token" in prepared)||
+     typeof prepared.token!=="string"||!("tabId" in prepared)||typeof prepared.tabId!=="number"){
+    throw new Error("Chrome did not return a prepared extension management tab");
+  }
+  if(await bridgeSession()!==session) throw new Error("Chrome Ops Bridge profile changed before the developer operation");
+  return prepared.token;
+};
+const macDeveloperOperation=async(operation:"reload"|"errors"|"remove",id:string)=>{
+  const session=await bridgeSession();
+  const token=await preparedMacPage(session);
+  const action=await helper(operation,id,token);
+  if(await bridgeSession()!==session) throw new Error("Chrome Ops Bridge profile changed during the developer operation");
+  return {action,session};
+};
 
 server.tool("chrome_status", "Check whether Chrome Ops Host and the Chrome extension are connected.", {}, async () => text(await bridge.status()));
 proxy("tabs_list", "List Chrome tabs and their ids, URLs, titles and active state.", {}, "tabs.list");
@@ -28,12 +54,51 @@ proxy("extensions_list", "List installed Chrome extensions/apps including enable
 proxy("extension_get", "Get metadata for one installed extension, including install type and enabled state.", { id:z.string() }, "extensions.get");
 proxy("extension_set_enabled", "Enable or disable an installed extension. Chrome may require a user gesture/confirmation.", { id: z.string(), enabled: z.boolean() }, "extensions.setEnabled");
 proxy("extension_uninstall", "Request uninstall of another extension. Chrome always presents confirmation for another extension.", { id: z.string() }, "extensions.uninstall");
-server.tool("extension_dev_load", "Load an unpacked Chrome extension directory through the restricted Windows helper. The directory must contain manifest.json.", { path:z.string().min(1) }, async ({path})=>text(await helper("load",path)));
-server.tool("extension_dev_reload", "Reload an installed unpacked extension by exact extension id through Chrome's extension-management UI.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(await helper("reload",id)));
-server.tool("extension_dev_errors", "Open the Errors view for an unpacked extension by exact extension id.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(await helper("errors",id)));
+server.tool("extension_dev_load", "Load an unpacked Chrome extension directory through the restricted native helper. The directory must contain manifest.json.", { path:z.string().min(1) }, async ({path})=>{
+  if(process.platform!=="darwin") return text(await helper("load",path));
+  const directory=await realpath(path);
+  if(!(await stat(directory)).isDirectory()||!(await stat(join(directory,"manifest.json"))).isFile()){
+    throw new Error("Load path must be a directory containing manifest.json");
+  }
+  const inventory=async()=>{
+    const result=await bridge.call("extensions.list");
+    if(!Array.isArray(result)) throw new Error("Chrome extension inventory is unavailable");
+    return result as {id?:string;installType?:string}[];
+  };
+  const originalSession=await bridgeSession();
+  const before=new Set((await inventory()).map(entry=>entry?.id).filter((id):id is string=>typeof id==="string"));
+  const token=await preparedMacPage(originalSession);
+  const action=await helper("load",directory,token);
+  if(!action||typeof action!=="object"||!("data" in action)||!action.data||
+     typeof action.data!=="object"||!("extensionId" in action.data)||typeof action.data.extensionId!=="string"){
+    throw new Error("Native helper did not identify the newly loaded extension");
+  }
+  const id=action.data.extensionId;
+  if(before.has(id)) throw new Error(`Chrome reported an existing extension ${id} as a new load`);
+  for(let i=0;i<20;i++){
+    const found=(await inventory()).find(entry=>entry?.id===id);
+    if(found){
+      if(await bridgeSession()!==originalSession) throw new Error("Chrome Ops Bridge profile changed during Load unpacked");
+      if(found.installType!=="development") throw new Error(`Loaded extension ${id} is not an unpacked development extension`);
+      return text({...action,verifiedLoaded:true,extensionId:id});
+    }
+    await new Promise(resolve=>setTimeout(resolve,100));
+  }
+  throw new Error(`Chrome management did not report the loaded extension ${id}`);
+});
+server.tool("extension_dev_reload", "Reload an installed unpacked extension by exact extension id through Chrome's extension-management UI.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(process.platform==="darwin"?(await macDeveloperOperation("reload",id)).action:await helper("reload",id)));
+server.tool("extension_dev_errors", "Open the Errors view for an unpacked extension by exact extension id.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>text(process.platform==="darwin"?(await macDeveloperOperation("errors",id)).action:await helper("errors",id)));
 server.tool("extension_dev_remove", "Remove an unpacked extension by exact extension id and verify it disappeared from chrome.management.", { id:z.string().regex(/^[a-p]{32}$/) }, async ({id})=>{
-  const action=await helper("remove",id); let removed=false;
-  for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,100));try{await bridge.call("extensions.get",{id})}catch{removed=true;break}}
+  const operation=process.platform==="darwin"?await macDeveloperOperation("remove",id):{action:await helper("remove",id),session:null};
+  const action=operation.action; let removed=false;
+  for(let i=0;i<20;i++){
+    await new Promise(r=>setTimeout(r,100));
+    if(operation.session!==null&&await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed before remove verification");
+    const inventory=await bridge.call("extensions.list");
+    if(!Array.isArray(inventory)) throw new Error("Chrome extension inventory is unavailable after remove confirmation");
+    if(operation.session!==null&&await bridgeSession()!==operation.session) throw new Error("Chrome Ops Bridge profile changed during remove verification");
+    if(!inventory.some(entry=>entry && typeof entry==="object" && entry.id===id)){removed=true;break}
+  }
   if(!removed) throw new Error(`Chrome still reports extension ${id} after remove confirmation`);
   return text({action,verifiedRemoved:true});
 });
