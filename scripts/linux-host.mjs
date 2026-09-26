@@ -57,13 +57,15 @@ function listeningPids(port) {
 
 function unitDefinition() {
   const hostBuild = createHash("sha256").update(readFileSync(host)).digest("hex");
-  const quote = value => `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+  // systemd expands % specifiers everywhere; ExecStart also takes quoted words, WorkingDirectory a bare path.
+  const literal = value => value.replaceAll("%", "%%");
+  const quote = value => `"${literal(value).replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
   return `[Unit]
 Description=Chrome Ops MCP Host
 
 [Service]
 ExecStart=${quote(process.execPath)} ${quote(host)}
-WorkingDirectory=${quote(root)}
+WorkingDirectory=${literal(root)}
 Environment=CHROME_OPS_HOST_BUILD=${hostBuild}
 Restart=always
 RestartSec=2

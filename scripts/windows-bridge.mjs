@@ -8,8 +8,10 @@ import { bridgeIsCurrent, hostCall, reloadBridgeItself, root, waitFor } from "./
 const helper = resolve(root, "helper/windows/chrome-ops-helper.ps1");
 const sha256 = value => createHash("sha256").update(value).digest("hex");
 
-export async function updateBridge() {
+export async function updateBridge({ waitConnected = false } = {}) {
   await waitFor(async () => { try { return (await hostCall("host.status")).host === true; } catch { return false; } }, "Chrome Ops Host", 15000);
+  // A Bridge that was connected before the Host restart comes back within its 30-second reconnect alarm.
+  if (waitConnected) await waitFor(async () => (await hostCall("host.status")).connected === true, "the previously connected Chrome Ops Bridge to reconnect", 45000);
   const status = await hostCall("host.status");
   if (status.ambiguousProfiles) throw new Error("Multiple Chrome Ops Bridge profiles are connected; close the unintended Bridge profile before setup");
   if (!status.connected) return { connected: false, bridgeUpdated: false };
@@ -34,7 +36,11 @@ export async function updateBridge() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  updateBridge().then(result => console.log(JSON.stringify({ ok: true, ...result })), error => {
+  if (process.argv.includes("--connected")) {
+    console.log(String(await hostCall("host.status").then(status => status.connected === true, () => false)));
+    process.exit(0);
+  }
+  updateBridge({ waitConnected: process.argv.includes("--wait-connected") }).then(result => console.log(JSON.stringify({ ok: true, ...result })), error => {
     console.log(JSON.stringify({ ok: false, error: error.message }));
     process.exitCode = 1;
   });

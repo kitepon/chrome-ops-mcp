@@ -16,6 +16,7 @@ $trigger=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $settings=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Description 'Persistent local host for Chrome Ops MCP' -Force | Out-Null
 # Restart so the Host runs the build that was just made, then bring an already connected Bridge up to date.
+$wasConnected=(node (Join-Path $root 'scripts\windows-bridge.mjs') --connected) -eq 'true'
 Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 $deadline=(Get-Date).AddSeconds(15)
 while(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 32145,32146 -State Listen -ErrorAction SilentlyContinue){
@@ -23,6 +24,6 @@ while(Get-NetTCPConnection -LocalAddress 127.0.0.1 -LocalPort 32145,32146 -State
   Start-Sleep -Milliseconds 250
 }
 Start-ScheduledTask -TaskName $taskName
-$bridge=node (Join-Path $root 'scripts\windows-bridge.mjs')|ConvertFrom-Json
+$bridge=node (Join-Path $root 'scripts\windows-bridge.mjs') $(if($wasConnected){'--wait-connected'})|ConvertFrom-Json
 if(-not $bridge.ok){throw "Chrome Ops Bridge update failed: $($bridge.error)"}
 [pscustomobject]@{ok=$true;task=$taskName;root=$root;node=$node;host=$hostJs;extension=(Join-Path $root 'extension');connected=$bridge.connected;bridgeUpdated=$bridge.bridgeUpdated}|ConvertTo-Json -Compress
