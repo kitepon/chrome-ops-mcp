@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createHash, randomUUID } from "node:crypto";
-import WebSocket from "ws";
+import { createHash } from "node:crypto";
+import { inspectClients } from "./clients.mjs";
+import { bridgeIsCurrent, hostStatus, hostCall, reloadBridgeItself, waitFor } from "./host-client.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const label = "dev.kitepon.chrome-ops-host";
@@ -15,7 +16,6 @@ const plist = resolve(homedir(), "Library/LaunchAgents", `${label}.plist`);
 const host = resolve(root, "dist/host.js");
 const native = resolve(root, "helper/macos/.build/release/chrome-ops-helper");
 const logDir = resolve(homedir(), "Library/Logs/ChromeOps");
-const sleep = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms));
 
 function command(program, args, { allowMissing = false, logOutput = false } = {}) {
   const result = spawnSync(program, args, { encoding: "utf8", cwd: root, maxBuffer: 1024 * 1024 });
@@ -85,15 +85,6 @@ function writeJob(contents) {
   }
 }
 
-async function waitFor(predicate, description, limitMs = 5000) {
-  const deadline = Date.now() + limitMs;
-  do {
-    if (await predicate()) return;
-    await sleep(120);
-  } while (Date.now() < deadline);
-  throw new Error(`Timed out waiting for ${description}`);
-}
-
 function legacyHostPid() {
   const chrome = listeningPids(32145);
   const clients = listeningPids(32146);
@@ -112,41 +103,12 @@ function legacyHostPid() {
   return pid;
 }
 
-async function hostCall(method, params = {}) {
-  return new Promise((resolvePromise, reject) => {
-    const socket = new WebSocket("ws://127.0.0.1:32146");
-    const id = randomUUID();
-    const timer = setTimeout(() => { socket.terminate(); reject(new Error(`Host request timed out: ${method}`)); }, 17000);
-    socket.on("open", () => socket.send(JSON.stringify({ id, type: "request", method, params })));
-    socket.on("message", raw => {
-      let response;
-      try { response = JSON.parse(raw.toString()); } catch (error) { clearTimeout(timer); socket.close(); reject(error); return; }
-      if (response.id !== id) return;
-      clearTimeout(timer);
-      socket.close();
-      response.ok ? resolvePromise(response.result) : reject(new Error(response.error));
-    });
-    socket.on("error", error => { clearTimeout(timer); reject(error); });
-  });
-}
-
-const hostStatus = () => hostCall("host.status");
-
 async function updateBridge() {
   const status = await hostStatus();
   if (status.ambiguousProfiles) throw new Error("Multiple Chrome Ops Bridge profiles are connected; close the unintended Bridge profile before setup");
   if (!status.connected) return { connected: false, bridgeUpdated: false };
-  const sourceHash = createHash("sha256").update(readFileSync(resolve(root, "extension/service-worker.js"))).digest("hex");
-  const manifestHash = createHash("sha256").update(readFileSync(resolve(root, "extension/manifest.json"))).digest("hex");
-  const version = JSON.parse(readFileSync(resolve(root, "extension/manifest.json"), "utf8")).version;
-  let capabilities;
-  try { capabilities = await hostCall("extensions.capabilities"); }
-  catch (error) {
-    if (error.message !== "Unknown method: extensions.capabilities") throw error;
-  }
-  if (capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash && capabilities.runningVersion === version) {
-    return { connected: true, bridgeUpdated: false };
-  }
+  if (await bridgeIsCurrent()) return { connected: true, bridgeUpdated: false };
+  if (await reloadBridgeItself(status)) return { connected: true, bridgeUpdated: true };
   const extensions = await hostCall("extensions.list");
   if (!Array.isArray(extensions)) throw new Error("Bridge extension inventory is invalid");
   const matches = extensions.filter(item => item?.name === "Chrome Ops MCP Bridge" && item.installType === "development" && item.enabled === true);
@@ -168,10 +130,7 @@ async function updateBridge() {
     const current = await hostStatus();
     if (current.ambiguousProfiles) throw new Error("Multiple Bridge profiles connected after update");
     if (!current.connected || current.bridgeSession === status.bridgeSession) return false;
-    try {
-      const currentCapabilities = await hostCall("extensions.capabilities");
-      return currentCapabilities?.preparePage === true && currentCapabilities.sourceHash === sourceHash && currentCapabilities.manifestHash === manifestHash && currentCapabilities.runningVersion === version;
-    } catch { return false; }
+    return bridgeIsCurrent();
   }, "updated Chrome Ops Bridge to reconnect with the expected source", 12000);
   return { connected: true, bridgeUpdated: true };
 }
@@ -261,48 +220,13 @@ async function doctor() {
         error: report.error ?? null };
     } catch { helperResult = { built: true, error: "Native helper doctor returned invalid JSON" }; }
   }
-  const codex = spawnSync("codex", ["mcp", "get", "chrome-ops", "--json"], { encoding: "utf8" });
-  let codexRegistered = false;
-  let codexError = null;
-  if (codex.status === 0) {
-    try {
-      const entry = JSON.parse(codex.stdout).transport;
-      codexRegistered = entry?.type === "stdio" && entry.command === process.execPath &&
-        entry.args?.length === 1 && entry.args[0] === resolve(root, "dist/index.js");
-    } catch { codexError = "Codex MCP registration returned invalid JSON"; }
-  } else if (codex.error) codexError = codex.error.message;
-  else if (!codex.stderr.includes("No MCP server named 'chrome-ops' found")) codexError = codex.stderr.trim();
-  const cursorConfig = resolve(homedir(), ".cursor/mcp.json");
-  let cursorRegistered = false;
-  let cursorError = null;
-  if (existsSync(cursorConfig)) {
-    try {
-      const entry = JSON.parse(readFileSync(cursorConfig, "utf8")).mcpServers?.["chrome-ops"];
-      cursorRegistered = entry?.command === process.execPath && entry.args?.length === 1 &&
-        entry.args[0] === resolve(root, "dist/index.js");
-    } catch { cursorError = "Cursor MCP configuration is invalid JSON"; }
-  }
-  const grok = spawnSync("grok", ["mcp", "list", "--json"], { encoding: "utf8" });
-  let grokRegistered = false;
-  let grokError = null;
-  if (grok.status === 0) {
-    try {
-      grokRegistered = JSON.parse(grok.stdout).some(item => item.name === "chrome-ops" &&
-        item.command === process.execPath && item.args?.length === 1 &&
-        item.args[0] === resolve(root, "dist/index.js"));
-    } catch { grokError = "Grok MCP inventory returned invalid JSON"; }
-  } else grokError = grok.error?.message ?? grok.stderr.trim();
   return {
     ok: job.running && ports.chrome.includes(job.pid) && ports.clients.includes(job.pid) &&
       hostResult.host === true && helperResult.accessibility === true,
     node: { path: process.execPath, version: process.version },
     launchAgent: { label, ...job, plistExists: existsSync(plist) },
     host: { ...hostResult, ports }, nativeHelper: helperResult,
-    clients: {
-      codex: { detected: codex.error === undefined, registered: codexRegistered, error: codexError },
-      cursor: { detected: existsSync("/Applications/Cursor.app") || existsSync(resolve(homedir(), "Applications/Cursor.app")), registered: cursorRegistered, error: cursorError },
-      grok: { detected: grok.error === undefined, registered: grokRegistered, error: grokError },
-    },
+    clients: inspectClients(),
   };
 }
 

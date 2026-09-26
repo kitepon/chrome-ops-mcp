@@ -101,7 +101,12 @@ async function dispatch(method, p) {
         return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
       };
       // getURL reads the files on disk, which change before the running worker is reloaded; the in-memory manifest does not.
-      return { preparePage:true, sourceHash:await hash("service-worker.js"), manifestHash:await hash("manifest.json"), runningVersion:chrome.runtime.getManifest().version };
+      return { preparePage:true, reloadSelf:true, sourceHash:await hash("service-worker.js"), manifestHash:await hash("manifest.json"), runningVersion:chrome.runtime.getManifest().version };
+    }
+    case "extensions.reloadSelf": {
+      // Answer first; the reload ends this worker and its Host connection.
+      setTimeout(() => chrome.runtime.reload(), 200);
+      return { reloading:true };
     }
     case "extensions.preparePage": {
       if (chrome.extension.inIncognitoContext) throw new Error("Chrome Ops Bridge is running in an incognito profile");

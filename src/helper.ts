@@ -7,7 +7,7 @@ const platform = process.platform;
 
 export function helper(operation: "load"|"reload"|"errors"|"remove", value: string, pageToken?: string): Promise<unknown> {
   if (platform !== "darwin" && platform !== "win32") {
-    throw new Error(`Unsupported helper platform: ${platform}`);
+    throw new Error(`Unpacked-extension developer operations are not automated on ${platform} yet; use chrome://extensions for Load unpacked, reload, errors and remove`);
   }
   const command = platform === "darwin"
     ? resolve(here, "../helper/macos/.build/release/chrome-ops-helper")

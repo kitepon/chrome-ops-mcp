@@ -33,10 +33,13 @@
     "setup:windows": "pwsh -NoProfile -File scripts/setup-windows.ps1",
     "setup:macos": "node scripts/macos-host.mjs setup",
     "uninstall:macos": "node scripts/macos-host.mjs uninstall",
+    "setup:linux": "npm ci && npm run build && node scripts/linux-host.mjs setup",
+    "uninstall:linux": "node scripts/linux-host.mjs uninstall",
     "doctor": "node scripts/platform.mjs doctor",
     "register:codex": "node scripts/platform.mjs register-codex",
     "register:cursor": "node scripts/platform.mjs register-cursor",
     "register:grok": "node scripts/platform.mjs register-grok",
+    "register:claude": "node scripts/platform.mjs register-claude",
     "test": "npm run build",
     "test:smoke": "node test/smoke.mjs",
     "test:devtools": "node test/devtools-smoke.mjs"
@@ -48,6 +51,7 @@
     "codex",
     "cursor",
     "grok",
+    "claude",
     "developer-tools"
   ],
   "author": "kitepon.dev",

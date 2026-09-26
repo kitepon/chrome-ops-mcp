@@ -1,60 +1,20 @@
 // Update an already connected unpacked Chrome Ops Bridge on Windows so its worker matches this checkout.
-import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import WebSocket from "ws";
+import { bridgeIsCurrent, hostCall, reloadBridgeItself, root, waitFor } from "./host-client.mjs";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const helper = resolve(root, "helper/windows/chrome-ops-helper.ps1");
 const sha256 = value => createHash("sha256").update(value).digest("hex");
-
-function hostCall(method, params = {}) {
-  return new Promise((resolvePromise, reject) => {
-    const socket = new WebSocket("ws://127.0.0.1:32146");
-    const id = randomUUID();
-    const timer = setTimeout(() => { socket.terminate(); reject(new Error(`Host request timed out: ${method}`)); }, 17000);
-    socket.on("open", () => socket.send(JSON.stringify({ id, type: "request", method, params })));
-    socket.on("message", raw => {
-      let response;
-      try { response = JSON.parse(raw.toString()); } catch (error) { clearTimeout(timer); socket.close(); reject(error); return; }
-      if (response.id !== id) return;
-      clearTimeout(timer);
-      socket.close();
-      response.ok ? resolvePromise(response.result) : reject(new Error(response.error));
-    });
-    socket.on("error", error => { clearTimeout(timer); reject(error); });
-  });
-}
-
-async function waitFor(check, label, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await check()) return;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  throw new Error(`Timed out waiting for ${label}`);
-}
 
 export async function updateBridge() {
   await waitFor(async () => { try { return (await hostCall("host.status")).host === true; } catch { return false; } }, "Chrome Ops Host", 15000);
   const status = await hostCall("host.status");
   if (status.ambiguousProfiles) throw new Error("Multiple Chrome Ops Bridge profiles are connected; close the unintended Bridge profile before setup");
   if (!status.connected) return { connected: false, bridgeUpdated: false };
-  const sourceHash = sha256(readFileSync(resolve(root, "extension/service-worker.js")));
-  const manifestHash = sha256(readFileSync(resolve(root, "extension/manifest.json")));
-  const version = JSON.parse(readFileSync(resolve(root, "extension/manifest.json"), "utf8")).version;
-  const current = async () => {
-    try {
-      const capabilities = await hostCall("extensions.capabilities");
-      return capabilities?.preparePage === true && capabilities.sourceHash === sourceHash && capabilities.manifestHash === manifestHash && capabilities.runningVersion === version;
-    } catch (error) {
-      if (error.message === "Unknown method: extensions.capabilities") return false;
-      throw error;
-    }
-  };
-  if (await current()) return { connected: true, bridgeUpdated: false };
+  if (await bridgeIsCurrent()) return { connected: true, bridgeUpdated: false };
+  if (await reloadBridgeItself(status)) return { connected: true, bridgeUpdated: true };
   const extensions = await hostCall("extensions.list");
   const matches = Array.isArray(extensions) ? extensions.filter(item => item?.name === "Chrome Ops MCP Bridge" && item.installType === "development" && item.enabled === true) : [];
   if (matches.length !== 1) throw new Error("Expected exactly one enabled unpacked Chrome Ops MCP Bridge in the connected profile");
@@ -68,7 +28,7 @@ export async function updateBridge() {
   await waitFor(async () => {
     const now = await hostCall("host.status");
     if (now.ambiguousProfiles) throw new Error("Multiple Bridge profiles connected after update");
-    return now.connected && now.bridgeSession !== status.bridgeSession && await current();
+    return now.connected && now.bridgeSession !== status.bridgeSession && await bridgeIsCurrent();
   }, "updated Chrome Ops Bridge to reconnect with the expected source", 12000);
   return { connected: true, bridgeUpdated: true };
 }
