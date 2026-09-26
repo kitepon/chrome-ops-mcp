@@ -5,13 +5,15 @@ import assert from "node:assert/strict";
 const handlers = new Map();
 let inventory;
 let calls;
-mock.module("@modelcontextprotocol/sdk/server/mcp.js", { exports: {
+const mockNamed = (specifier, exports) => mock.module(specifier,
+  Number(process.versions.node.split(".")[0]) < 24 ? { namedExports: exports } : { exports });
+mockNamed("@modelcontextprotocol/sdk/server/mcp.js", {
   McpServer: class {
     tool(name, _description, _schema, handler) { handlers.set(name, handler); }
     async connect() {}
   },
-} });
-mock.module("../dist/bridge.js", { exports: {
+});
+mockNamed("../dist/bridge.js", {
   ChromeBridgeClient: class {
     async call(method) {
       if (method === "host.status") return { connected: true, bridgeSession: "same-profile" };
@@ -19,10 +21,10 @@ mock.module("../dist/bridge.js", { exports: {
       calls.push(method); return inventory();
     }
   },
-} });
-mock.module("../dist/helper.js", { exports: {
+});
+mockNamed("../dist/helper.js", {
   helper: async (operation, id) => ({ ok: true, operation, data: { extensionId: id } }),
-} });
+});
 await import("../dist/index.js");
 const id = "a".repeat(32);
 const remove = () => handlers.get("extension_dev_remove")({ id });
