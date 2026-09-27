@@ -1,22 +1,45 @@
-# MCP client support
+# Harness support
 
-Chrome Ops keeps client-specific installation outside the core runtime.
+Chrome Ops supports four harnesses: Claude Code, Codex, Cursor, and the local Grok Build CLI. Each launches the stdio MCP server (`node dist/index.js`); that short-lived process talks to the persistent Chrome Ops Host on `127.0.0.1:32146`.
 
-## Local stdio clients
+Topology: `harness -> Chrome Ops stdio MCP -> persistent Host -> Chrome Bridge extension -> Chrome`.
 
-- Codex — local MCP configuration/CLI when detected.
-- Cursor — global `~/.cursor/mcp.json`.
-- Grok Build — local MCP configuration/CLI when detected.
-- Claude clients — adapter to be implemented after current local configuration is detected/verified.
+## Registration
 
-These clients launch `dist/index.js`; that short-lived stdio process talks to the persistent Chrome Ops Host on `127.0.0.1:32146`.
+```sh
+npm run register            # every installed harness
+npm run register:<harness>  # claude, codex, cursor, or grok
+```
 
-On macOS, run `npm run setup:macos` first, then `npm run register:codex`, `npm run register:cursor`, or `npm run register:grok` for each installed client. Each registration command also checks Host setup. Existing client settings are backed up before a change, and a conflicting `chrome-ops` entry is reported instead of replaced. Run `npm run doctor` to inspect the exact registration state. Setup reloads an already connected unpacked Bridge when its worker source changes; it requires a uniquely connected Chrome profile and Accessibility authorization. Client configuration uses the current absolute Node executable and built MCP server path; relocation or a Node change requires deliberately updating that entry.
+Registration runs `npm run setup`'s Host step first, so the Host is running before a harness can start the server. The flow is the same on every OS and for every harness:
 
-## Grok Build
+1. Read the existing `chrome-ops` entry through the harness adapter.
+2. If it already launches this Node with this checkout's `dist/index.js`, do nothing.
+3. If a different `chrome-ops` entry exists, stop without changing anything.
+4. Otherwise back up the harness configuration file, add the entry, and read it back.
 
-Grok Build supports local stdio MCP servers natively. Register Chrome Ops with Grok's own `grok mcp add` command. Grok Build also supports user/project TOML MCP configuration and compatibility imports from Cursor/Claude MCP files.
+| Harness | Adapter | How it is registered | Configuration |
+| --- | --- | --- | --- |
+| Claude Code | `scripts/harness/claude.mjs` | `claude mcp add-json --scope user` | `~/.claude.json` |
+| Codex | `scripts/harness/codex.mjs` | `codex mcp add` | `~/.codex/config.toml` |
+| Cursor | `scripts/harness/cursor.mjs` | writes `mcpServers.chrome-ops` | `~/.cursor/mcp.json` (editor and `cursor-agent`) |
+| Grok Build | `scripts/harness/grok.mjs` | `grok mcp add`, then `grok mcp doctor` | `~/.grok/config.toml` |
 
-Topology: `Grok Build -> Chrome Ops stdio MCP -> persistent Host -> Chrome`.
+On Windows the harness CLIs are often npm shims. The Windows OS adapter runs the program the shim points at, so arguments are never re-parsed by `cmd.exe` or PowerShell.
 
-This support is for the local **Grok Build CLI**, not the grok.com Custom MCP connector product.
+`npm run doctor` shows `detected`, `registered`, and any error per harness.
+
+## Checking a harness
+
+| Harness | Check |
+| --- | --- |
+| Claude Code | `claude mcp list` shows `chrome-ops ... ✔ Connected` |
+| Codex | ask it to call `chrome_status` |
+| Cursor | `cursor-agent mcp list-tools chrome-ops` lists the tools |
+| Grok Build | `grok mcp doctor chrome-ops` reports it healthy |
+
+## Adding a harness
+
+Add `scripts/harness/<name>.mjs` exporting `{ name, configFile, detect(os), read(os), add(os, server) }` and list it in `scripts/harness/index.mjs`. Run harness CLIs through `os.exec(program, args)` so each OS can resolve them. Do not put OS checks in a harness adapter.
+
+Grok support is for the local **Grok Build CLI**, not the grok.com Custom MCP connector product.

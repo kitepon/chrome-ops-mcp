@@ -29,4 +29,31 @@ Network secrets are redacted before crossing from the extension to the MCP proce
 
 Initial `Load unpacked` is a helper operation because Chrome's public extension APIs do not expose arbitrary unpacked-directory loading.
 
-On macOS, the Bridge first prepares a fixed management tab in its own Chrome profile. The helper matches that exact tab before using developer controls. The installer has one internal, fixed Bridge-update action for an already connected unpacked Bridge; it is not an MCP tool and does not accept arbitrary URLs or input commands.
+On every OS with a helper, the Bridge first prepares a fixed management tab in its own Chrome profile. The helper matches that exact tab before using developer controls. The installer has one internal, fixed Bridge-update action for an already connected unpacked Bridge; it is not an MCP tool and does not accept arbitrary URLs or input commands.
+
+## Code layout: shared, OS, harness
+
+Shared code, OS adaptation, and harness adaptation are separated at the file level. Shared files do not branch on `process.platform`; OS files do not know about harnesses; harness files do not know about OSes.
+
+### MCP server (`src/`)
+
+- Shared: `index.ts` (tools), `bridge.ts` (Host client), `host.ts` (persistent Host), `helper.ts` (runs the OS helper and parses its JSON), `protocol.ts`.
+- OS: `os/macos.ts`, `os/windows.ts`, `os/linux.ts`, selected by `os/index.ts`. Contract in `os/types.ts`:
+  - `unsupportedReason` — `null` when the OS has a developer-operation helper.
+  - `reportsLoadedId` — whether the helper reads the new id after Load unpacked. Otherwise the server takes the one new development extension.
+  - `helper(operation, value, token)` — the helper command line.
+
+### Setup (`scripts/`)
+
+- Shared: `chrome-ops.mjs` (entry: `setup`, `uninstall`, `doctor`, `register`), `lib/host-client.mjs`, `lib/bridge-update.mjs`, `lib/registration.mjs`, `lib/process.mjs`.
+- OS: `os/macos.mjs` (LaunchAgent, Swift build), `os/windows.mjs` (Scheduled Task, npm-shim resolution), `os/linux.mjs` (systemd user service). Each exports:
+  - `name`, `stateDir` (backups), `exec(program, args)` (runs a harness CLI), `prepare()`,
+  - `installService()` → `{ changed, service }` (idempotent, rolls back on failure), `uninstallService()`, `serviceStatus()`,
+  - `developerOperations()` (doctor), `nativeBridgeUpdate(id, activeTabHashes)` or `null`.
+- Harness: `harness/claude.mjs`, `harness/codex.mjs`, `harness/cursor.mjs`, `harness/grok.mjs`. See `docs/CLIENTS.md`.
+
+`test/adapters.test.mjs` checks that every OS and harness adapter fills the same contract.
+
+### Native helpers (`helper/`)
+
+`helper/contract.ts` is shared. `helper/macos/` (Swift, Accessibility) and `helper/windows/` (PowerShell 7, UI Automation) implement it. Linux has no helper yet.

@@ -8,63 +8,57 @@ Initial capabilities: tab discovery, CDP attach/detach, Console/Log capture, Net
 
 This project targets **developers using AI coding agents**. The intended loop is edit -> reload -> inspect Console/Network -> fix -> repeat, including Chrome-extension development.
 
-Client adapters are documented in `docs/CLIENTS.md`. Codex, Cursor, and the local Grok Build CLI use stdio MCP. Chrome Ops never needs to expose its localhost Host ports for these clients.
+Supported harnesses are Claude Code, Codex, Cursor, and the local Grok Build CLI. Each launches the stdio MCP server; Chrome Ops never exposes its localhost Host ports to them. See `docs/CLIENTS.md`.
 
 Network event observations are redacted before they cross the extension boundary: Cookie, Set-Cookie, Authorization, proxy authorization, and cookie value fields are replaced with `[REDACTED]`. Response bodies requested explicitly with `network_response_body` are **not** content-scanned for arbitrary secrets; see `SECURITY.md`.
 
-## Development
+## Support
 
-```powershell
-npm install
-npm run build
-npm start
-```
+| | Host service | Unpacked-extension developer operations |
+| --- | --- | --- |
+| macOS | LaunchAgent | Swift helper (Accessibility) |
+| Windows 11 | logon Scheduled Task | PowerShell 7 helper (UI Automation) |
+| Linux (systemd) | systemd user service | not automated yet — use `chrome://extensions` |
 
-On Windows, the current developer baseline is PowerShell 7+. `npm run setup:windows` builds the project and registers **Chrome Ops Host** as a per-user logon scheduled task. The Host owns the persistent Chrome connection; short-lived stdio MCP processes connect to it on localhost. It does not modify an MCP client's configuration unless that client is explicitly supported/detected.
+Claude Code, Codex, Cursor, and Grok Build are registered the same way on every OS.
 
-On macOS, `npm run setup:macos` builds the Swift helper and installs a per-user LaunchAgent for the same Host. When an unpacked Bridge is already connected, setup also updates it from this installation and confirms that the new worker reconnects. The command is safe to repeat; `npm run uninstall:macos` removes the LaunchAgent and stops its Host. Neither command removes Chrome's bridge extension or client registrations. The Host logs to `~/Library/Logs/ChromeOps/`.
+## Quick start
 
-## Quick start (macOS alpha)
-
-Requirements: macOS with the Swift toolchain (`swift`), Chrome, Node.js 22+, and Chrome Developer mode. Give Accessibility permission to the app that runs Chrome Ops when macOS requests it. `npm run doctor` reports that authorization; the Swift helper does not use Screen Recording APIs.
+Requirements: Chrome with Developer mode, Node.js 22+, and Git. macOS also needs the Swift toolchain (`swift`) and Accessibility permission for the app that runs Chrome Ops. Windows also needs PowerShell 7+ (`pwsh`). Linux needs a systemd user session.
 
 ```sh
 git clone https://github.com/kitepon/chrome-ops-mcp.git
 cd chrome-ops-mcp
-npm ci
-npm run setup:macos
-npm run doctor
+npm run setup
 ```
 
-Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this package's `extension/` directory. Keep Chrome open for developer-extension operations. Check that `npm run doctor` reports `host.connected: true` after the bridge connects. Register each installed MCP client you intend to use:
+`npm run setup` installs dependencies, builds, and starts the persistent **Chrome Ops Host** as a per-user service for this OS. It is safe to repeat. When an unpacked Bridge is already connected, it also updates the Bridge from this checkout and waits for the new worker to reconnect.
+
+Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository's `extension/` directory. Load it in one Chrome profile only; if several Bridge profiles connect, Chrome Ops reports the ambiguity instead of guessing. Then register the harnesses you use:
 
 ```sh
-npm run register:codex
-npm run register:cursor
-npm run register:grok
-```
-
-Each registration command verifies the Host and preserves a backup before changing an existing client configuration. Restart or reload the client if it does not discover the new MCP server immediately. `npm run doctor` reports the LaunchAgent, Host, native helper permission, and client registration state. Load the Bridge once in the intended Chrome profile. If multiple Bridge profiles connect at the same time, Chrome Ops reports the ambiguity and waits for one profile to remain connected.
-
-## Quick start (Windows alpha)
-
-Requirements: Windows 11, Chrome, Node.js 22+, PowerShell 7+, and Chrome Developer mode. The Windows helper is validated with Japanese and English Chrome UI labels.
-
-```powershell
-npm install
-npm run setup:windows
+npm run register          # every installed harness
+npm run register:claude   # or one of: claude, codex, cursor, grok
 npm run doctor
 ```
 
-Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `extension/` from this package/repository. Then register the MCP with one or more detected clients:
+Registration backs up the harness configuration before a change and refuses to replace a different `chrome-ops` entry. Restart or reload the harness if it does not discover the new server immediately. `npm run doctor` reports the Host service, the Bridge connection, developer-operation readiness, and the registration state of each harness. `npm run uninstall` stops and removes the Host service; it leaves the Bridge extension and harness registrations in place.
 
-```powershell
-npm run register:codex
-npm run register:cursor
-npm run register:grok
-```
+Registrations point at the absolute path of the current Node executable and of `dist/index.js` in this checkout. Moving the checkout or changing Node requires registering again.
 
-Restart/reload the MCP client after registration if it does not pick up the new server immediately.
+Logs: macOS writes the Host log to `~/Library/Logs/ChromeOps/`; Linux uses `journalctl --user -u chrome-ops-host`. Backups of harness configuration go to `~/Library/Application Support/ChromeOps/backups` (macOS), `%LOCALAPPDATA%\ChromeOps\backups` (Windows), or `${XDG_STATE_HOME:-~/.local/state}/chrome-ops/backups` (Linux).
+
+## Code layout
+
+Shared code, OS adaptation, and harness adaptation live in separate files.
+
+| Area | Shared | OS adaptation | Harness adaptation |
+| --- | --- | --- | --- |
+| MCP server | `src/index.ts`, `src/bridge.ts`, `src/host.ts`, `src/helper.ts` | `src/os/{macos,windows,linux}.ts` | — |
+| Setup | `scripts/chrome-ops.mjs`, `scripts/lib/` | `scripts/os/{macos,windows,linux}.mjs` | `scripts/harness/{claude,codex,cursor,grok}.mjs` |
+| Native helper | `helper/contract.ts` | `helper/macos/`, `helper/windows/` | — |
+
+See `docs/ARCHITECTURE.md` for the contracts between them.
 
 ## Core MCP tools
 
@@ -91,16 +85,17 @@ Chrome 116+ keeps extension service workers alive when WebSocket traffic is acti
 - Windows helper: Load unpacked, exact-ID reload, Errors extraction, remove + postcondition verification
 - macOS helper: Load unpacked, exact-ID reload, Errors extraction, remove + postcondition verification on a disposable fixture
 - macOS LaunchAgent: setup, repeat setup, restart, uninstall, and reinstall with stdio MCP reconnection
+- v0.3 on macOS 27, Windows 11, and Ubuntu 26.04: `npm run setup`, `npm run register` for Claude Code, Codex, Cursor, and Grok Build, `npm run doctor`, and each harness's own MCP check. Load/reload/errors/remove passed on macOS and Windows with a disposable fixture.
 
 ## Known boundary
 
 Chrome's public `chrome.management` extension API can inspect installed extensions but does not expose arbitrary unpacked-directory loading or another extension's developer reload action. Chrome Ops uses deliberately narrow PowerShell 7 + Windows UI Automation and Swift + macOS Accessibility helpers for those developer-mode operations. The helpers are not generic shell/UI automation APIs.
 
-### v0.2 alpha limitations
+### v0.3 alpha limitations
 
 - Chrome Developer mode must already be enabled for unpacked-extension operations.
 - Developer-management UI automation is currently validated against Japanese and English Chrome labels; other UI languages are not yet guaranteed.
-- The Chrome Ops extension itself must be loaded manually once during initial setup. Subsequent `setup:macos` runs update an already connected unpacked Bridge.
-- Client registration adapters currently cover Codex, Cursor, and Grok Build. See `docs/CLIENTS.md`.
-- On macOS, each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API. The Windows helper contract remains unchanged.
-- macOS was verified on one Mac and Chrome installation. A login/logout cycle, revoked Screen Recording permission, and a fresh Windows machine were not tested in this macOS pass.
+- The Chrome Ops extension itself must be loaded manually once during initial setup. Later `npm run setup` runs update an already connected unpacked Bridge.
+- Linux does not automate Load unpacked, reload, errors, or remove yet. Chrome's extension-management page is not exposed through AT-SPI in the tested GNOME Wayland session; everything else works on Linux.
+- Each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API.
+- Each OS was verified on one machine and Chrome installation.
