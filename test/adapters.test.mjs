@@ -13,7 +13,18 @@ test("every OS adapter fills the same setup contract", () => {
   const keys = ["name", "stateDir", "exec", "prepare", "installService", "uninstallService", "serviceStatus", "developerOperations", "nativeBridgeUpdate"];
   for (const os of [linux, macos, windows]) assert.deepEqual(Object.keys(os).sort(), [...keys].sort(), os.name);
   assert.equal(linux.nativeBridgeUpdate, null);
-  assert.equal(linux.developerOperations().supported, false);
+  assert.equal(linux.developerOperations().supported, true);
+});
+
+test("every MCP-server OS adapter fills the same helper contract", async () => {
+  const { linux: linuxServer } = await import("../dist/os/linux.js");
+  const { macos: macosServer } = await import("../dist/os/macos.js");
+  const { windows: windowsServer } = await import("../dist/os/windows.js");
+  const keys = ["helper", "name", "reportsLoadedId", "unsupportedReason", "usesManagementTab"];
+  for (const os of [linuxServer, macosServer, windowsServer]) assert.deepEqual(Object.keys(os).sort(), keys, os.name);
+  // Linux works on its own development Chrome, so the Bridge does not prepare a management tab for it.
+  assert.equal(linuxServer.usesManagementTab, false);
+  assert.deepEqual(linuxServer.helper("reload", "a".repeat(32)).args.slice(1), ["reload", "a".repeat(32)]);
 });
 
 test("every harness adapter fills the same registration contract", () => {

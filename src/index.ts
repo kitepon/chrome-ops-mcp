@@ -20,8 +20,9 @@ const bridgeSession=async()=>{
   }
   return status.bridgeSession;
 };
-// Every OS helper acts on a management tab that the Bridge opens and focuses first.
+// macOS and Windows helpers act on a management tab that the Bridge opens and focuses first.
 const preparedPage=async(session:string)=>{
+  if(!currentOs().usesManagementTab) return undefined;
   const prepared=await bridge.call("extensions.preparePage");
   if(!prepared||typeof prepared!=="object"||!("token" in prepared)||
      typeof prepared.token!=="string"||!("tabId" in prepared)||typeof prepared.tabId!=="number"){

@@ -9,5 +9,7 @@ export interface OsAdapter {
   unsupportedReason: string|null;
   /** True when the helper reads the new extension id from Chrome's page after Load unpacked. */
   reportsLoadedId: boolean;
+  /** True when the helper drives a chrome://extensions tab that the Bridge must prepare first. */
+  usesManagementTab: boolean;
   helper(operation: DeveloperOperation, value: string, pageToken?: string): HelperInvocation;
 }

@@ -9,6 +9,7 @@ export const macos: OsAdapter = {
   name: "macos",
   unsupportedReason: null,
   reportsLoadedId: true,
+  usesManagementTab: true,
   helper: (operation, value, pageToken) => ({
     command: resolve(here, "../../helper/macos/.build/release/chrome-ops-helper"),
     args: [operation, value, ...(pageToken ? [pageToken] : [])],

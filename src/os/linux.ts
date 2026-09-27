@@ -1,9 +1,14 @@
-// Linux: Chrome's extension-management page is not reachable from AT-SPI yet, so there is no helper.
+// Linux: Chrome Ops runs its own development Chrome and performs the operations through that Chrome's DevTools pipe.
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import type { OsAdapter } from "./types.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 export const linux: OsAdapter = {
   name: "linux",
-  unsupportedReason: "Unpacked-extension developer operations are not automated on Linux yet; use chrome://extensions for Load unpacked, reload, errors and remove",
-  reportsLoadedId: false,
-  helper: () => { throw new Error(linux.unsupportedReason!); },
+  unsupportedReason: null,
+  reportsLoadedId: true,
+  usesManagementTab: false,
+  helper: (operation, value) => ({ command: process.execPath, args: [resolve(here, "linux-helper.js"), operation, value] }),
 };

@@ -17,7 +17,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - run: node --experimental-test-module-mocks --test test/adapters.test.mjs test/redaction.test.mjs test/remove.test.mjs test/host-profiles.test.mjs test/host-origin.test.mjs test/prepare-page.test.mjs test/load.test.mjs
+      - run: node --experimental-test-module-mocks --test test/adapters.test.mjs test/redaction.test.mjs test/remove.test.mjs test/host-profiles.test.mjs test/host-origin.test.mjs test/prepare-page.test.mjs test/load.test.mjs test/linux-chrome.test.mjs
       - if: runner.os == 'macOS'
         run: swift build --package-path helper/macos -c release
       - run: npm audit --omit=dev
