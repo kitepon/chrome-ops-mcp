@@ -1,6 +1,6 @@
 {
   "name": "chrome-ops-mcp",
-  "version": "0.3.0-alpha.0",
+  "version": "0.4.0-alpha.0",
   "description": "MCP server for Chrome DevTools, extension management, and browser settings via a local Chrome extension.",
   "type": "module",
   "main": "dist/index.js",

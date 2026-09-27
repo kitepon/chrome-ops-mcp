@@ -8,12 +8,21 @@ import { helper } from "./helper.js";
 import { currentOs } from "./os/index.js";
 
 const bridge = new ChromeBridgeClient();
-const server = new McpServer({ name: "chrome-ops-mcp", version: "0.3.0-alpha.0" });
+const server = new McpServer({ name: "chrome-ops-mcp", version: "0.4.0-alpha.0" });
 const text = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v, null, 2) }] });
 const proxy = (name: string, description: string, schema: Record<string, z.ZodTypeAny>, method = name) =>
   server.tool(name, description, schema, async args => text(await bridge.call(method, args)));
 const bridgeSession=async()=>{
-  const status=await bridge.call("host.status");
+  let status=await bridge.call("host.status");
+  // On Linux the Bridge lives in Chrome Ops' own development Chrome; start it when it is closed.
+  const start=currentOs().startBrowser;
+  if(start&&status&&typeof status==="object"&&"bridgeCount" in status&&status.bridgeCount===0){
+    start();
+    for(let i=0;i<150&&(status as {bridgeCount?:number}).bridgeCount===0;i++){
+      await new Promise(resolve=>setTimeout(resolve,200));
+      status=await bridge.call("host.status");
+    }
+  }
   if(!status||typeof status!=="object"||!("connected" in status)||status.connected!==true||
      !("bridgeSession" in status)||typeof status.bridgeSession!=="string"){
     throw new Error("A unique Chrome Ops Bridge profile is required for developer operations");

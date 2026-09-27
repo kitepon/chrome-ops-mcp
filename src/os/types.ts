@@ -12,4 +12,6 @@ export interface OsAdapter {
   /** True when the helper drives a chrome://extensions tab that the Bridge must prepare first. */
   usesManagementTab: boolean;
   helper(operation: DeveloperOperation, value: string, pageToken?: string): HelperInvocation;
+  /** Starts the Chrome that carries the Bridge when Chrome Ops owns it (Linux); null when the user runs Chrome. */
+  startBrowser: (() => void)|null;
 }

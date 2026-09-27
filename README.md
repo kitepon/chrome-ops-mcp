@@ -18,13 +18,15 @@ Network event observations are redacted before they cross the extension boundary
 | --- | --- | --- |
 | macOS | LaunchAgent | Swift helper (Accessibility) |
 | Windows 11 | logon Scheduled Task | PowerShell 7 helper (UI Automation) |
-| Linux (systemd) | systemd user service | not automated yet — use `chrome://extensions` |
+| Linux (systemd) | systemd user service | Chrome Ops' own development Chrome (DevTools pipe) |
 
 Claude Code, Codex, Cursor, and Grok Build are registered the same way on every OS.
 
+On Linux, Chrome Ops runs a separate **development Chrome** with its own profile instead of driving your everyday Chrome. Wayland does not let other programs press Chrome's buttons, so Chrome Ops starts that Chrome itself and uses Chrome's DevTools pipe for Load unpacked, reload, errors and remove. The Bridge lives in that Chrome, so every Chrome Ops tool works on its tabs.
+
 ## Quick start
 
-Requirements: Chrome with Developer mode, Node.js 22+, and Git. macOS also needs the Swift toolchain (`swift`) and Accessibility permission for the app that runs Chrome Ops. Windows also needs PowerShell 7+ (`pwsh`). Linux needs a systemd user session.
+Requirements: Chrome, Node.js 22+, and Git. macOS also needs the Swift toolchain (`swift`) and Accessibility permission for the app that runs Chrome Ops. Windows also needs PowerShell 7+ (`pwsh`). Linux needs a graphical systemd user session and Google Chrome or Chromium.
 
 ```sh
 git clone https://github.com/kitepon/chrome-ops-mcp.git
@@ -34,7 +36,11 @@ npm run setup
 
 `npm run setup` installs dependencies, builds, and starts the persistent **Chrome Ops Host** as a per-user service for this OS. It is safe to repeat. When an unpacked Bridge is already connected, it also updates the Bridge from this checkout and waits for the new worker to reconnect.
 
-Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository's `extension/` directory. Load it in one Chrome profile only; if several Bridge profiles connect, Chrome Ops reports the ambiguity instead of guessing. Then register the harnesses you use:
+On macOS and Windows, open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select this repository's `extension/` directory. Load it in one Chrome profile only; if several Bridge profiles connect, Chrome Ops reports the ambiguity instead of guessing.
+
+On Linux, `npm run setup` starts the development Chrome and loads the Bridge into it; there is nothing to load by hand. Do not load the Bridge into another Chrome on Linux. Close the development Chrome whenever you like; reopen it from **Chrome Ops Chrome** in the application menu, or let a developer operation start it. Its profile is `${XDG_DATA_HOME:-~/.local/share}/chrome-ops/chrome-profile`.
+
+Then register the harnesses you use:
 
 ```sh
 npm run register          # every installed harness
@@ -42,11 +48,11 @@ npm run register:claude   # or one of: claude, codex, cursor, grok
 npm run doctor
 ```
 
-Registration backs up the harness configuration before a change and refuses to replace a different `chrome-ops` entry. Restart or reload the harness if it does not discover the new server immediately. `npm run doctor` reports the Host service, the Bridge connection, developer-operation readiness, and the registration state of each harness. `npm run uninstall` stops and removes the Host service; it leaves the Bridge extension and harness registrations in place.
+Registration backs up the harness configuration before a change and refuses to replace a different `chrome-ops` entry. Restart or reload the harness if it does not discover the new server immediately. `npm run doctor` reports the Host service, the Bridge connection, developer-operation readiness, and the registration state of each harness. `npm run uninstall` stops and removes the Host service (and on Linux the development Chrome service and launcher); it leaves the Bridge extension, the Linux development Chrome profile, and harness registrations in place.
 
 Registrations point at the absolute path of the current Node executable and of `dist/index.js` in this checkout. Moving the checkout or changing Node requires registering again.
 
-Logs: macOS writes the Host log to `~/Library/Logs/ChromeOps/`; Linux uses `journalctl --user -u chrome-ops-host`. Backups of harness configuration go to `~/Library/Application Support/ChromeOps/backups` (macOS), `%LOCALAPPDATA%\ChromeOps\backups` (Windows), or `${XDG_STATE_HOME:-~/.local/state}/chrome-ops/backups` (Linux).
+Logs: macOS writes the Host log to `~/Library/Logs/ChromeOps/`; Linux uses `journalctl --user -u chrome-ops-host` and `journalctl --user -u chrome-ops-chrome`. Backups of harness configuration go to `~/Library/Application Support/ChromeOps/backups` (macOS), `%LOCALAPPDATA%\ChromeOps\backups` (Windows), or `${XDG_STATE_HOME:-~/.local/state}/chrome-ops/backups` (Linux).
 
 ## Code layout
 
@@ -54,9 +60,9 @@ Shared code, OS adaptation, and harness adaptation live in separate files.
 
 | Area | Shared | OS adaptation | Harness adaptation |
 | --- | --- | --- | --- |
-| MCP server | `src/index.ts`, `src/bridge.ts`, `src/host.ts`, `src/helper.ts` | `src/os/{macos,windows,linux}.ts` | — |
+| MCP server | `src/index.ts`, `src/bridge.ts`, `src/host.ts`, `src/helper.ts` | `src/os/{macos,windows,linux}.ts`, `src/os/linux-*.ts` | — |
 | Setup | `scripts/chrome-ops.mjs`, `scripts/lib/` | `scripts/os/{macos,windows,linux}.mjs` | `scripts/harness/{claude,codex,cursor,grok}.mjs` |
-| Native helper | `helper/contract.ts` | `helper/macos/`, `helper/windows/` | — |
+| Native helper | `helper/contract.ts` | `helper/macos/`, `helper/windows/`, `src/os/linux-helper.ts` | — |
 
 See `docs/ARCHITECTURE.md` for the contracts between them.
 
@@ -86,16 +92,17 @@ Chrome 116+ keeps extension service workers alive when WebSocket traffic is acti
 - macOS helper: Load unpacked, exact-ID reload, Errors extraction, remove + postcondition verification on a disposable fixture
 - macOS LaunchAgent: setup, repeat setup, restart, uninstall, and reinstall with stdio MCP reconnection
 - v0.3 on macOS 27, Windows 11, and Ubuntu 26.04: `npm run setup`, `npm run register` for Claude Code, Codex, Cursor, and Grok Build, `npm run doctor`, and each harness's own MCP check. Load/reload/errors/remove passed on macOS and Windows with a disposable fixture.
+- v0.4 on Ubuntu 26.04 (GNOME Wayland): the development Chrome started by `npm run setup`, and load/reload/errors/remove through MCP and from Claude Code, Codex, Cursor, and Grok Build. CI runs the Linux helper against headless Chrome.
 
 ## Known boundary
 
-Chrome's public `chrome.management` extension API can inspect installed extensions but does not expose arbitrary unpacked-directory loading or another extension's developer reload action. Chrome Ops uses deliberately narrow PowerShell 7 + Windows UI Automation and Swift + macOS Accessibility helpers for those developer-mode operations. The helpers are not generic shell/UI automation APIs.
+Chrome's public `chrome.management` extension API can inspect installed extensions but does not expose arbitrary unpacked-directory loading or another extension's developer reload action. Chrome Ops uses deliberately narrow PowerShell 7 + Windows UI Automation and Swift + macOS Accessibility helpers for those developer-mode operations. On Linux it uses the DevTools pipe of the development Chrome it started itself. The helpers are not generic shell/UI automation APIs.
 
-### v0.3 alpha limitations
+### v0.4 alpha limitations
 
-- Chrome Developer mode must already be enabled for unpacked-extension operations.
-- Developer-management UI automation is currently validated against Japanese and English Chrome labels; other UI languages are not yet guaranteed.
-- The Chrome Ops extension itself must be loaded manually once during initial setup. Later `npm run setup` runs update an already connected unpacked Bridge.
-- Linux does not automate Load unpacked, reload, errors, or remove yet. Chrome's extension-management page is not exposed through AT-SPI in the tested GNOME Wayland session; everything else works on Linux.
-- Each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API.
+- On macOS and Windows, Chrome Developer mode must already be enabled for unpacked-extension operations. The Linux development Chrome turns it on itself.
+- Developer-management UI automation on macOS and Windows is currently validated against Japanese and English Chrome labels; other UI languages are not yet guaranteed.
+- On macOS and Windows, the Chrome Ops extension itself must be loaded manually once during initial setup. Later `npm run setup` runs update an already connected unpacked Bridge.
+- On Linux the developer operations and every other tool act on the development Chrome, not on your everyday Chrome.
+- On macOS and Windows, each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API.
 - Each OS was verified on one machine and Chrome installation.

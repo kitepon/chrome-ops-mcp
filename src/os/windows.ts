@@ -11,6 +11,7 @@ export const windows: OsAdapter = {
   // The Windows helper cannot read the new id; the server takes the one new development extension instead.
   reportsLoadedId: false,
   usesManagementTab: true,
+  startBrowser: null,
   helper: (operation, value) => ({
     command: "pwsh",
     args: ["-NoProfile","-ExecutionPolicy","Bypass","-File",resolve(here, "../../helper/windows/chrome-ops-helper.ps1"),
