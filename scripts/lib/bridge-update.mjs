@@ -25,6 +25,6 @@ export async function updateBridge(os) {
     const now = await hostStatus();
     if (now.ambiguousProfiles) throw new Error("Multiple Bridge profiles connected after update");
     return now.connected && now.bridgeSession !== status.bridgeSession && await bridgeIsCurrent();
-  }, "updated Chrome Ops Bridge to reconnect with the expected source", 12000);
+  }, "updated Chrome Ops Bridge to reconnect with the expected source", 45000);
   return { connected: true, bridgeUpdated: true };
 }

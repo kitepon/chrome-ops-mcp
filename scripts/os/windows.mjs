@@ -55,12 +55,12 @@ function resolveCommand(name) {
   const exe = paths.find(path => /\.exe$/i.test(path));
   if (exe) return { command: exe, prefix: [] };
   const cmd = paths.find(path => /\.cmd$/i.test(path));
-  const target = cmd && readFileSync(cmd, "utf8").match(/"%dp0%\\([^"%]+)"/)?.[1];
-  if (target) {
-    const full = resolve(dirname(cmd), target);
-    if (/\.exe$/i.test(full)) return { command: full, prefix: [] };
-    if (/\.[cm]?js$/i.test(full)) return { command: process.execPath, prefix: [full] };
-  }
+  // npm shims name the real program relative to themselves, after an optional bundled node.exe.
+  const targets = cmd ? [...readFileSync(cmd, "utf8").matchAll(/"%dp0%\\([^"%]+)"/g)].map(match => resolve(dirname(cmd), match[1])) : [];
+  const script = targets.find(path => /\.[cm]?js$/i.test(path) && existsSync(path));
+  if (script) return { command: process.execPath, prefix: [script] };
+  const program = targets.find(path => /\.exe$/i.test(path) && existsSync(path));
+  if (program) return { command: program, prefix: [] };
   const ps1 = paths.find(path => /\.ps1$/i.test(path)) ?? (cmd && existsSync(cmd.replace(/\.cmd$/i, ".ps1")) ? cmd.replace(/\.cmd$/i, ".ps1") : null);
   if (ps1) return { command: "pwsh", prefix: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1] };
   return null;
