@@ -11,8 +11,11 @@ export const serviceName = "chrome-ops-chrome.service";
 export const profileDir = () => process.env.CHROME_OPS_CHROME_PROFILE ??
   join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "chrome-ops/chrome-profile");
 
-export const socketPath = () => process.env.CHROME_OPS_CHROME_SOCKET ??
-  join(process.env.XDG_RUNTIME_DIR || join(homedir(), ".local/state"), "chrome-ops/chrome.sock");
+// MCP clients may start the server with a trimmed environment, so the runtime directory is also found without XDG_RUNTIME_DIR.
+const runtimeDir = () => process.env.XDG_RUNTIME_DIR ||
+  [`/run/user/${process.getuid?.()}`].find(path => existsSync(path)) || join(homedir(), ".local/state");
+
+export const socketPath = () => process.env.CHROME_OPS_CHROME_SOCKET ?? join(runtimeDir(), "chrome-ops/chrome.sock");
 
 export function chromeBinary(): string|null {
   if (process.env.CHROME_OPS_CHROME_BINARY) return process.env.CHROME_OPS_CHROME_BINARY;
