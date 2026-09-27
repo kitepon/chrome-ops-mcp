@@ -5,6 +5,7 @@ import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { ChromeBridgeClient } from "./bridge.js";
 import { helper } from "./helper.js";
+import { currentOs } from "./os/index.js";
 
 const bridge = new ChromeBridgeClient();
 const server = new McpServer({ name: "chrome-ops-mcp", version: "0.2.0-alpha.0" });
@@ -19,7 +20,7 @@ const bridgeSession=async()=>{
   }
   return status.bridgeSession;
 };
-// macOS and Windows helpers both act on a management tab that the Bridge opens and focuses first.
+// Every OS helper acts on a management tab that the Bridge opens and focuses first.
 const preparedPage=async(session:string)=>{
   const prepared=await bridge.call("extensions.preparePage");
   if(!prepared||typeof prepared!=="object"||!("token" in prepared)||
@@ -72,9 +73,9 @@ server.tool("extension_dev_load", "Load an unpacked Chrome extension directory t
   if(!action||typeof action!=="object"||!("data" in action)||!action.data||typeof action.data!=="object"){
     throw new Error("Native helper did not report the Load unpacked result");
   }
-  // The macOS helper reads the new id from the page; on Windows it is the one new development extension.
+  // Some helpers read the new id from the page; otherwise it is the one new development extension.
   const reported="extensionId" in action.data&&typeof action.data.extensionId==="string"?action.data.extensionId:null;
-  if(process.platform==="darwin"&&!reported) throw new Error("Native helper did not identify the newly loaded extension");
+  if(currentOs().reportsLoadedId&&!reported) throw new Error("Native helper did not identify the newly loaded extension");
   if(reported&&before.has(reported)) throw new Error(`Chrome reported an existing extension ${reported} as a new load`);
   for(let i=0;i<20;i++){
     const added=(await inventory()).filter(entry=>typeof entry?.id==="string"&&!before.has(entry.id));

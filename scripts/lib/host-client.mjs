@@ -5,7 +5,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import WebSocket from "ws";
 
-export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+export const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const sleep = ms => new Promise(resolvePromise => setTimeout(resolvePromise, ms));
 
 export function hostCall(method, params = {}) {

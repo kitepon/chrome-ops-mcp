@@ -20,6 +20,7 @@ function bridge({ windows, last, incognito = false }) {
   const chrome = {
     runtime: { onStartup: runtimeListener, onInstalled: runtimeListener },
     action: { onClicked: listener },
+    alarms: { create() {}, onAlarm: listener },
     debugger: { onDetach: listener, onEvent: listener },
     extension: { inIncognitoContext: incognito },
     windows: {

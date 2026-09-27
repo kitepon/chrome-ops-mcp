@@ -7,7 +7,7 @@ const noop = () => {};
 const event = {addListener:noop};
 const context = vm.createContext({
   WebSocket:class {}, clearTimeout:noop, clearInterval:noop,
-  chrome:{runtime:{onStartup:event,onInstalled:event},action:{onClicked:event},debugger:{onDetach:event,onEvent:event}},
+  chrome:{runtime:{onStartup:event,onInstalled:event},action:{onClicked:event},alarms:{create:noop,onAlarm:event},debugger:{onDetach:event,onEvent:event}},
 });
 vm.runInContext(readFileSync(new URL("../extension/service-worker.js",import.meta.url),"utf8"),context);
 const sanitize = input => JSON.parse(JSON.stringify(context.sanitize(input)));
