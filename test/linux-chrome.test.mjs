@@ -17,7 +17,8 @@ test("the Linux helper loads, reloads, reads errors from, and removes an unpacke
   t.after(async () => {
     supervisor.kill("SIGTERM");
     await new Promise(resolve => supervisor.exitCode === null ? supervisor.once("exit", resolve) : resolve());
-    rmSync(dir, { recursive: true, force: true });
+    // Chrome's helper processes can still be writing to the profile for a moment after the browser exits.
+    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   });
   for (let i = 0; i < 150 && !existsSync(env.CHROME_OPS_CHROME_SOCKET); i++) await new Promise(resolve => setTimeout(resolve, 200));
   assert.ok(existsSync(env.CHROME_OPS_CHROME_SOCKET), "supervisor socket");
