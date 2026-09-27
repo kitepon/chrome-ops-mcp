@@ -1,8 +1,7 @@
 // Linux helper: hand one developer operation to the development Chrome supervisor and print its JSON result.
 // It starts the chrome-ops-chrome service when the supervisor is not running yet.
-import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
-import { serviceName, socketPath } from "./linux-paths.js";
+import { serviceName, socketPath, startService } from "./linux-paths.js";
 
 const [operation, value] = process.argv.slice(2);
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -25,7 +24,7 @@ for (let attempt = 0; attempt < 150 && reply === undefined; attempt++) {
     reply = await ask();
   } catch (error) {
     if (!["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
-    if (attempt === 0 && process.env.CHROME_OPS_CHROME_SOCKET === undefined) spawnSync("systemctl", ["--user", "start", serviceName]);
+    if (attempt === 0 && process.env.CHROME_OPS_CHROME_SOCKET === undefined) startService();
     await sleep(200);
   }
 }

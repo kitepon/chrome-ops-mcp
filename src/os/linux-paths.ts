@@ -1,5 +1,6 @@
 // Linux: where the dedicated development Chrome keeps its profile and control socket.
 // Shared by the supervisor (linux-chrome.ts), the helper (linux-helper.ts) and setup (scripts/os/linux.mjs).
+import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -12,10 +13,15 @@ export const profileDir = () => process.env.CHROME_OPS_CHROME_PROFILE ??
   join(process.env.XDG_DATA_HOME || join(homedir(), ".local/share"), "chrome-ops/chrome-profile");
 
 // MCP clients may start the server with a trimmed environment, so the runtime directory is also found without XDG_RUNTIME_DIR.
-const runtimeDir = () => process.env.XDG_RUNTIME_DIR ||
+export const runtimeDir = () => process.env.XDG_RUNTIME_DIR ||
   [`/run/user/${process.getuid?.()}`].find(path => existsSync(path)) || join(homedir(), ".local/state");
 
 export const socketPath = () => process.env.CHROME_OPS_CHROME_SOCKET ?? join(runtimeDir(), "chrome-ops/chrome.sock");
+
+// systemctl --user finds the user's service manager through XDG_RUNTIME_DIR, which a trimmed environment lacks.
+export function startService(): void {
+  spawnSync("systemctl", ["--user", "start", serviceName], { env: { ...process.env, XDG_RUNTIME_DIR: runtimeDir() }, stdio: "ignore" });
+}
 
 export function chromeBinary(): string|null {
   if (process.env.CHROME_OPS_CHROME_BINARY) return process.env.CHROME_OPS_CHROME_BINARY;
