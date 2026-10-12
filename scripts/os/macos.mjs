@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { root, waitFor } from "../lib/host-client.mjs";
 import { check, run, spawn } from "../lib/process.mjs";
+import { nodeCommand } from "../lib/node-command.mjs";
 
 const label = "dev.kitepon.chrome-ops-host";
 const domain = () => `gui/${process.getuid()}`;
@@ -48,7 +49,7 @@ function jobDefinition() {
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${label}</string>
-<key>ProgramArguments</key><array><string>${xml(process.execPath)}</string><string>${xml(host)}</string></array>
+<key>ProgramArguments</key><array><string>${xml(nodeCommand())}</string><string>${xml(host)}</string></array>
 <key>EnvironmentVariables</key><dict><key>CHROME_OPS_HOST_BUILD</key><string>${hostBuild}</string></dict>
 <key>KeepAlive</key><true/>
 <key>Umask</key><integer>63</integer>

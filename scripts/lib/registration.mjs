@@ -4,9 +4,10 @@ import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import { harnesses } from "../harness/index.mjs";
 import { root } from "./host-client.mjs";
+import { nodeCommand } from "./node-command.mjs";
 
 // Every harness launches this Node with the built server, so a registration is tied to this checkout.
-export const server = () => ({ command: process.execPath, args: [resolve(root, "dist/index.js")] });
+export const server = () => ({ command: nodeCommand(), args: [resolve(root, "dist/index.js")] });
 
 export function matching(entry) {
   const found = entry?.transport ?? entry;
