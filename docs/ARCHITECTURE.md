@@ -21,7 +21,8 @@ Paths passed to `load` must resolve to a directory containing `manifest.json`. T
 
 The separate account-audit entry (`bin/audit-read.js` → `src/audit-read.ts`) sends
 only `audit.read({service})` to the local Host. The Bridge owns fixed URLs and
-read projections, uses a new background tab, evaluates without enabling capture,
+read projections, uses a new background tab, evaluates in an explicit top-frame
+isolated world without enabling capture, waits for bounded SPA rendering,
 and closes only its new tab. This entry starts no MCP server and adds no MCP
 tool. Failed cleanup retains tab IDs only in `storage.session`. The output and
 failure contract are documented in [`AUDIT_READ.md`](AUDIT_READ.md).
