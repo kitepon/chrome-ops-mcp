@@ -241,16 +241,13 @@ async function auditRead(p) {
     auditTabs.add(tabId);
     await chrome.storage.session.set({ auditPendingTabIds:[...auditTabs] });
     let ready = false;
-    // Keep the whole request inside the Host's 15-second deadline. A slow or
-    // redirected page is unconfirmed; it is never an empty app inventory.
-    for (let i = 0; i < 60; i++) {
+    // Wait for the allowed document URL to commit, not for every image/other
+    // subresource to finish. The isolated projection below checks DOM readiness.
+    for (let i = 0; i < 60 && Date.now() + 1000 < deadline; i++) {
       const current = await chrome.tabs.get(tabId);
       if (current.pendingUrl && !auditUrlAllowed(service, current.pendingUrl, url)) { result = unconfirmed("redirect"); break; }
-      if (current.status === "complete") {
-        if (!auditUrlAllowed(service, current.url, url)) result = unconfirmed("redirect");
-        else ready = true;
-        break;
-      }
+      if (auditUrlAllowed(service, current.url, url)) { ready = true; break; }
+      if (current.url && current.url !== "about:blank") { result = unconfirmed("redirect"); break; }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!ready) result ??= unconfirmed("timeout");
