@@ -1,6 +1,6 @@
 {
   "name": "chrome-ops-mcp",
-  "version": "0.4.0-alpha.0",
+  "version": "0.5.0-alpha.0",
   "description": "MCP server for Chrome DevTools, extension management, and browser settings via a local Chrome extension.",
   "type": "module",
   "main": "dist/index.js",
@@ -17,11 +17,13 @@
     "helper/macos/Sources/",
     "scripts/",
     "docs/ARCHITECTURE.md",
+    "docs/AUDIT_READ.md",
     "docs/CLIENTS.md",
     "docs/HELPER_WINDOWS.md",
     "README.md",
     "SECURITY.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22"
@@ -46,7 +48,8 @@
     "register:grok": "node scripts/chrome-ops.mjs register grok",
     "test": "npm run build",
     "test:smoke": "node test/smoke.mjs",
-    "test:devtools": "node test/devtools-smoke.mjs"
+    "test:devtools": "node test/devtools-smoke.mjs",
+    "test:unit": "node --experimental-test-module-mocks --test test/adapters.test.mjs test/redaction.test.mjs test/remove.test.mjs test/host-profiles.test.mjs test/host-origin.test.mjs test/prepare-page.test.mjs test/load.test.mjs test/node-command.test.mjs test/linux-chrome.test.mjs test/audit-read.test.mjs test/audit-entry.test.mjs test/audit-chrome.test.mjs test/mcp-contract.test.mjs"
   },
   "keywords": [
     "mcp",
@@ -61,13 +64,14 @@
   "author": "kitepon.dev",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@types/ws": "^8.18.1",
+    "linkedom": "0.18.13",
     "typescript": "^7.0.2"
   }
 }
