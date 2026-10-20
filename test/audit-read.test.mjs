@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {webcrypto, createHash} from 'node:crypto';
 import {parseHTML} from 'linkedom';
-import {auditPage, googleAccount} from './fixtures/audit-pages.mjs';
+import {auditPage, auditCurrentPage, googleAccount} from './fixtures/audit-pages.mjs';
 
 const source = readFileSync(new URL('../extension/service-worker.js', import.meta.url), 'utf8');
 const urls = {
@@ -15,7 +15,7 @@ const urls = {
 };
 function fixture(options = {}) {
   const calls = [], tabs = new Map([[1, {id:1, active:true, url:'https://owner.invalid/', windowId:7}]]);
-  let id = 10, eventListener;
+  let id = 10, eventListener, elapsed = 0;
   const event = {addListener(){}};
   const chrome = {
     storage:{session:{async get(){return {auditPendingTabIds:options.pendingIds || []};},async set(value){options.pendingIds=JSON.parse(JSON.stringify(value.auditPendingTabIds));}}},
@@ -34,7 +34,15 @@ function fixture(options = {}) {
       async detach(target) {calls.push(['detach',target]);},
       async sendCommand(target, method, params) {
         calls.push(['command',method,params]);
+        if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'fixture-frame'}}};
+        if(method==='Page.createIsolatedWorld'){
+          assert.equal(params.frameId,'fixture-frame');
+          if(options.failWorld)throw Error('Cannot isolate');
+          if(options.missingWorld)return {};
+          return {executionContextId:42};
+        }
         if(method!=='Runtime.evaluate')return {};
+        assert.equal(params.contextId,42,'all reads run in the fixed isolated world');
         if(options.evaluating)await options.evaluating(target);
         if(options.failEvaluate)throw Error('SECRET synthetic error never forwarded');
         if(options.exception)return {exceptionDetails:{text:'SECRET'}};
@@ -50,7 +58,8 @@ function fixture(options = {}) {
   };
   const context=vm.createContext({chrome,URL,crypto:webcrypto,TextEncoder,Uint8Array,
     WebSocket:class {static CONNECTING=0;static OPEN=1;readyState=0;},
-    clearTimeout,clearInterval,setTimeout:fn=>setTimeout(fn,0),setInterval(){},console,
+    Date:class extends Date {static now(){return Date.now()+elapsed;}},
+    clearTimeout,clearInterval,setTimeout:(fn,ms=0)=>{elapsed+=ms;return setTimeout(fn,0);},setInterval(){},console,
   });
   vm.runInContext(source,context);
   return {calls,tabs,options,context,
@@ -67,8 +76,8 @@ for(const service of Object.keys(urls))test(`${service}: background read, fixed 
   assert.equal(result.items[0].name,'Fixture 0');
   assert.equal(f.calls[0][1].url,urls[service]);assert.equal(f.calls[0][1].active,false);
   assert.deepEqual([...f.tabs.keys()],[1]);assert.equal(f.tabs.get(1).active,true);
-  assert.deepEqual(f.calls.filter(c=>c[0]==='command').map(c=>c[1]),['Runtime.evaluate']);
-  const params=f.calls.find(c=>c[0]==='command')[2];
+  assert.deepEqual(f.calls.filter(c=>c[0]==='command').map(c=>c[1]),['Page.getFrameTree','Page.createIsolatedWorld','Runtime.evaluate']);
+  const params=f.calls.find(c=>c[0]==='command'&&c[1]==='Runtime.evaluate')[2];
   assert.equal(params.throwOnSideEffect,undefined);assert.equal(params.returnByValue,true);assert.equal(params.awaitPromise,false);
   assert.equal(f.cacheSize(),0);assert.ok(!JSON.stringify(result).includes('Audit@EXAMPLE.test'));
   if(service.startsWith('google-'))assert.equal(result.account.email_sha256,createHash('sha256').update('audit@example.test').digest('hex'));
@@ -79,6 +88,22 @@ for(const service of Object.keys(urls))test(`${service}: background read, fixed 
 test('unsupported Discord creates no tab and calls no debugger',async()=>{
   const f=fixture();const r=plain(await f.read('discord-authorized-apps'));
   assert.equal(r.status,'ok');assert.deepEqual(r.unconfirmed,[{field:'all',reason:'not_supported'}]);assert.equal(f.calls.length,0);
+});
+for(const service of Object.keys(urls))test(`${service}: current layout remains scoped to named fields`,async()=>{
+  const f=fixture({html:auditCurrentPage(service)}),r=await f.read(service);
+  assert.equal(r.status,'ok');assert.equal(r.item_count,1);assert.equal(r.items[0].name,'Fixture 0');
+  assert.deepEqual([...f.tabs.keys()],[1]);assert.equal(f.cacheSize(),0);
+});
+test('waits for SPA identity/inventory without treating an initial shell as empty',async()=>{
+  let count=0,f;f=fixture({html:'<main></main>',evaluating(){if(++count===2)f.options.html=auditPage('x-connected-apps');}});
+  const r=await f.read('x-connected-apps');assert.equal(r.status,'ok');assert.equal(r.item_count,1);assert.equal(count,2);
+});
+test('Cloud organization-only shells remain unconfirmed until project rows arrive',async()=>{
+  const loaded=auditCurrentPage('google-cloud-projects');
+  const shell=loaded.replace(/<tbody>[\s\S]*?<\/tbody>/,'<tbody><tr><td></td><td>組織なし</td><td></td><td></td></tr></tbody>');
+  assert.equal((await fixture({html:shell}).read('google-cloud-projects')).stop_reason,'page_shape_changed');
+  let count=0,f;f=fixture({html:shell,evaluating(){if(++count===2)f.options.html=loaded;}});
+  const result=await f.read('google-cloud-projects');assert.equal(result.status,'ok');assert.equal(result.item_count,1);assert.equal(count,2);
 });
 test('unknown/prototype services and arbitrary URL/JS arguments are refused',async()=>{
   const f=fixture();
@@ -94,9 +119,10 @@ test('URL query allowlists reject lookalike origins, duplicates, fragments and n
   assert.equal(allowed('google-cloud-projects',urls['google-cloud-projects']+'?project=a%2Fb'),false);
 });
 test('redirect, page timeout, evaluation failure and exception always close only the new tab',async()=>{
-  for(const options of [{tab:{url:'https://accounts.google.com/login'}},{tab:{pendingUrl:'https://evil.invalid'}},{tab:{status:'loading'}},{failEvaluate:true},{exception:true},{failAttach:true}]){
+  for(const options of [{tab:{url:'https://accounts.google.com/login'}},{tab:{pendingUrl:'https://evil.invalid'}},{tab:{status:'loading'}},{failEvaluate:true},{exception:true},{failAttach:true},{failWorld:true},{missingWorld:true}]){
     const f=fixture(options),r=await f.read('google-connections');
     assert.equal(r.status,'stopped');assert.deepEqual([...f.tabs.keys()],[1]);assert.ok(!JSON.stringify(r).includes('SECRET'));
+    if(options.missingWorld)assert.ok(!f.calls.some(c=>c[0]==='command'&&c[1]==='Runtime.evaluate'));
   }
 });
 test('same-document guard and post-evaluation URL check discard data on navigation',async()=>{

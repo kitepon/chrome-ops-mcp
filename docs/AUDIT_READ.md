@@ -38,8 +38,11 @@ screen name is not returned. Accounts are never switched.
 
 One internal `audit.read({service})` request opens a new tab with `active:false`
 in an existing normal window belonging to the Bridge profile. It attaches its
-own debugger, runs one fixed synchronous DOM projection with `Runtime.evaluate`,
-and closes only that new tab in a `finally` block. It enables none of the
+own debugger, uses `Page.getFrameTree` and `Page.createIsolatedWorld` for the
+top frame, and runs a fixed synchronous DOM projection with `Runtime.evaluate`
+in that world's explicit context. Page scripts cannot replace that world's
+`URL` or DOM prototypes. The DOM itself remains untrusted page data. The audit
+closes only that new tab in a `finally` block. It enables none of the
 Runtime/Log/Network event streams. General tab/DevTools requests cannot target an
 active audit tab, and audit events, including late events, are excluded from the
 existing capture caches. Normal developer capture remains available elsewhere.
@@ -48,7 +51,9 @@ No window is created or focused. No click, input, page reload, DOM write, fetch,
 account mutation, or permission revocation is performed. Page loads still make
 the site's normal requests, and Chrome may display its debugger indicator.
 There is one concurrent audit; another is `stopped/busy`. Slow page loads stop
-after about six seconds, inside the existing Host's 15-second request deadline;
+after about six seconds. A loaded SPA can still be rendering, so missing
+identity/shape is retried within an approximately 11-second total Bridge budget,
+inside the existing Host's 15-second request deadline;
 the entry also has a 30-second overall deadline.
 
 If closing fails, the result is `stopped/cleanup_failed`, with nonzero exit code
@@ -59,14 +64,19 @@ but is cleared by browser restart or extension reload/update. An abrupt crash
 between tab creation and recording its ID cannot be made transactional with the
 Chrome tabs API. Normal completion and caught failures always attempt cleanup.
 
-Fixed semantic readers use visible named headings/lists, labeled fields and
-project-table columns. Unrecognized layouts stop with `page_shape_changed`.
+Fixed readers use visible named headings/lists, linked-app cards, labeled fields
+and project-table columns. They cover the current Linked apps, Cloud tree-grid,
+X settings-card and Discord application-card layouts. Unrecognized layouts stop
+with `page_shape_changed`. Cloud organization-only loading shells are never
+reported as zero projects; an empty tree without a recognized empty marker
+remains unconfirmed.
 An empty list is reported only with a recognized inventory container. Unread
 fields are explicitly `needs_click`, `not_found` or `not_supported`. Input and
 textarea values, token fields, whole-page text/HTML, cookies, storage, console,
 network records and exception text are never returned. These readers are
-conservative; they have been tested on synthetic pages, not signed-in accounts.
-Live account inspection belongs to the auditor and may require selector updates.
+conservative. Synthetic tests cover current layouts, hydration and hostile page
+prototype replacements. Maintenance checks on signed-in pages retain only field
+names/counts; the auditor owns the actual inventory and acceptance checks.
 
 Google identity is returned only as SHA-256 of the trimmed lowercase UTF-8 email
 and its domain; the email is hashed inside the Bridge before the Host receives

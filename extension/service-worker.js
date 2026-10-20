@@ -42,7 +42,10 @@ function auditProject(service) {
     return term?.nextElementSibling?.tagName === "DD" ? text(term.nextElementSibling) : null;
   };
   if (document.querySelector('input[type="password"], form[action*="signin"], form[action*="login"]')) return stopped("login_required");
-  const main = document.querySelector('main, [role="main"]');
+  // My Account's visible content can live outside its (hidden) account-menu
+  // role=main. Scope to the c-wiz containing the visible page heading instead.
+  const pageHeading = service === "google-connections" ? [...document.querySelectorAll("h1")].find(visible) : null;
+  const main = pageHeading?.closest("c-wiz") || [...document.querySelectorAll('main, [role="main"]')].find(visible);
   if (!main) return stopped("page_shape_changed");
   const listsNamed = pattern => [...main.querySelectorAll('[role="list"], ul')].filter(list => {
     if (!visible(list)) return false;
@@ -51,10 +54,10 @@ function auditProject(service) {
   });
   let account = null;
   if (service.startsWith("google-")) {
-    const accountButton = document.querySelector('[aria-label^="Google Account:"], [aria-label^="Google アカウント:"]');
-    const email = label(accountButton)?.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0];
-    if (!email) return stopped("account_unknown");
-    account = { email };
+    const buttons = document.querySelectorAll('[aria-label^="Google Account"], [aria-label^="Google アカウント"], cfc-account-chooser button[aria-label]');
+    const emails = new Set([...buttons].filter(visible).map(button => label(button)?.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]?.toLowerCase()).filter(Boolean));
+    if (emails.size !== 1) return stopped("account_unknown");
+    account = { email:[...emails][0] };
   }
   if (service === "x-connected-apps") {
     const button = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
@@ -65,16 +68,27 @@ function auditProject(service) {
   // Account checks precede even heading reads: an application's name may itself
   // be a heading. A disallowed X account must never have its inventory read.
   const headings = [...main.querySelectorAll('h1, h2, [role="heading"]')].map(text);
+  if ([...main.querySelectorAll('[aria-busy="true"], [role="progressbar"], mat-progress-bar, mat-spinner, cfc-progressbar')].some(visible)) return stopped("page_shape_changed");
   const items = [], unconfirmed = [];
-  const add = (field, reason) => unconfirmed.push({ field, reason });
+  const add = (field, reason) => { if (!unconfirmed.some(item => item.field === field && item.reason === reason)) unconfirmed.push({ field, reason }); };
   let truncated = false, hiddenRows = false;
   if (service === "google-connections") {
-    if (!headings.some(value => /^(Your connections to third-party apps (?:&|and) services|Third-party apps (?:&|and) services|サードパーティのアプリとサービス(?:との接続)?)$/i.test(value || ""))) return stopped("page_shape_changed");
+    const linkedApps = headings.some(value => /^(Linked apps|リンク済みアプリ)$/i.test(value || ""));
+    if (!linkedApps && !headings.some(value => /^(Your connections to third-party apps (?:&|and) services|Third-party apps (?:&|and) services|サードパーティのアプリとサービス(?:との接続)?)$/i.test(value || ""))) return stopped("page_shape_changed");
     const lists = listsNamed(/^(Third-party apps (?:&|and) services|Sign in with Google|サードパーティのアプリとサービス|Google でログイン)$/i);
-    if (!lists.length) return stopped("page_shape_changed");
-    for (const row of lists.flatMap(list => [...list.querySelectorAll(':scope > [role="listitem"], :scope > li')])) {
+    let rows = lists.flatMap(list => [...list.querySelectorAll(':scope > [role="listitem"], :scope > li')]);
+    if (linkedApps) {
+      rows = [...main.querySelectorAll('a[href]')].filter(link => {
+        let url; try { url = new URL(link.getAttribute("href"), location.href); } catch { return false; }
+        return url.origin === location.origin && !url.search && !url.hash && /^\/linkedapps\/[^/]+\/[^/]+$/.test(url.pathname);
+      });
+      // No card container/empty marker is known for this layout. Missing cards
+      // must remain unconfirmed rather than becoming a confirmed zero.
+      if (!rows.length) return stopped("page_shape_changed");
+    } else if (!lists.length) return stopped("page_shape_changed");
+    for (const row of rows) {
       if (!visible(row)) { hiddenRows = true; continue; }
-      const name = text(row.querySelector('h3, h2, [role="heading"]'));
+      const name = text(row.querySelector(linkedApps ? ':scope > div > div:last-child > div > div' : 'h3, h2, [role="heading"]'));
       if (!name) return stopped("page_shape_changed");
       const sectionName = text(row.closest("section")?.querySelector('h2, [role="heading"]'));
       const section = /^(Sign in with Google|Google でログイン|Third-party apps (?:&|and) services|サードパーティのアプリとサービス)$/i.test(sectionName || "") ? sectionName : null;
@@ -92,26 +106,41 @@ function auditProject(service) {
     let table, columns;
     for (const candidate of tables) {
       if (!visible(candidate)) continue;
-      const headers = [...candidate.querySelectorAll('th, [role="columnheader"]')].map(text);
+      const headerNodes = [...candidate.querySelectorAll('th, [role="columnheader"]')];
+      const headers = headerNodes.map(text);
+      const physicalColumn = index => {
+        const header = headerNodes[index];
+        if (!header) return -1;
+        if (Number.isInteger(header.cellIndex)) return header.cellIndex;
+        return [...header.parentElement.children].filter(node => ["TD", "TH"].includes(node.tagName) || ["columnheader", "gridcell"].includes(node.getAttribute("role"))).indexOf(header);
+      };
       const name = headers.findIndex(value => /^(Project name|Name|プロジェクト名|名前)$/i.test(value || ""));
-      const project_id = headers.findIndex(value => /^(Project ID|プロジェクト\s*ID)$/i.test(value || ""));
-      if (name >= 0 && project_id >= 0) { table = candidate; columns = { name, project_id, state:headers.findIndex(value => /^(Status|State|ステータス|状態)$/i.test(value || "")) }; break; }
+      const project_id = headers.findIndex(value => /^(Project ID|プロジェクト\s*ID|ID)$/i.test(value || ""));
+      if (name >= 0 && project_id >= 0) { table = candidate; columns = { name:physicalColumn(name), project_id:physicalColumn(project_id), state:physicalColumn(headers.findIndex(value => /^(Status|State|ステータス|状態)$/i.test(value || ""))) }; break; }
     }
     if (!table) return stopped("page_shape_changed");
     for (const row of table.querySelectorAll('tbody tr, [role="row"]')) {
+      if (row.querySelector('th, [role="columnheader"]')) continue;
       if (!visible(row)) { hiddenRows = true; continue; }
       const cells = [...row.querySelectorAll('td, [role="gridcell"]')];
       if (!cells.length) continue;
       const name = text(cells[columns.name]), project_id = text(cells[columns.project_id]);
+      if (!project_id && /^(No organization|組織なし)$/i.test(name || "")) continue;
+      // Resource Manager's tree also contains numeric organization/folder IDs.
+      // These are not projects; do not return them as project inventories.
+      if (name && /^[0-9]+$/.test(project_id || "")) { add("items", "needs_click"); continue; }
       if (!name || !/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/.test(project_id || "")) return stopped("page_shape_changed");
       items.push({ name, project_id, state:text(cells[columns.state]) });
       if (items.length > 200) { truncated = true; break; }
     }
+    // The tree initially renders only its organization root while projects are
+    // still being fetched. That shell is not proof of an empty inventory.
+    if (!items.length && (table.closest('[role="treegrid"], cfc-tree-grid') || table.matches('[role="treegrid"]'))) return stopped("page_shape_changed");
     add("organization", "needs_click"); add("pagination", "needs_click");
     if (items.some(item => !item.state)) add("state", "not_found");
   } else {
     const x = service === "x-connected-apps";
-    if (!headings.some(value => x ? /^(Connected apps|連携しているアプリ)$/i.test(value || "") : /^(Applications|My Applications|アプリケーション)$/i.test(value || ""))) return stopped("page_shape_changed");
+    if (!headings.some(value => x ? /^(Connected apps|連携しているアプリ)$/i.test(value || "") : /^(Applications|My Applications|アプリケーション)(?:\s*(?:New Application|新しいアプリケーション))?$/i.test(value || ""))) return stopped("page_shape_changed");
     const seen = new Set();
     for (const link of main.querySelectorAll("a[href]")) {
       if (!visible(link)) { hiddenRows = true; continue; }
@@ -121,7 +150,10 @@ function auditProject(service) {
       const match = x ? url.pathname.match(/^\/settings\/connected_apps\/([0-9]+)$/) : url.pathname.match(/^\/developers\/applications\/([0-9]{17,20})(?:\/(?:information|bot))?$/);
       if (!match || seen.has(match[1])) continue;
       seen.add(match[1]);
-      const name = text(link.querySelector('h2, h3, [role="heading"], [dir="auto"]'));
+      const nameNode = x
+        ? link.querySelector('h2, h3, [role="heading"], [dir="auto"]') || link.querySelector(':scope > div > div:nth-child(2) > div > span, [dir="ltr"]')
+        : link.querySelector('h2, h3, [role="heading"], abbr');
+      const name = text(nameNode);
       if (!name) return stopped("page_shape_changed");
       items.push(x ? { name, detail_path:url.pathname, permissions:null, granted:null } : {
         name, application_id:match[1], public_bot:null, requires_code_grant:null,
@@ -188,6 +220,7 @@ async function auditRead(p) {
   if (chrome.extension.inIncognitoContext) return unconfirmed("no_window");
   if (auditBusy) return unconfirmed("busy");
   auditBusy = true;
+  const deadline = Date.now() + 11000;
   let tabId;
   let result;
   try {
@@ -225,18 +258,31 @@ async function auditRead(p) {
       // Deliberately do NOT use ensureAttached(): it enables Runtime/Log/Network
       // event streams. A new audit tab has no pre-existing debugger attachment.
       await chrome.debugger.attach({ tabId }, "1.3");
-      const evaluated = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
-        // The guard executes in the same document as the fixed projection.
-        // URL checks before/after alone leave a navigation race.
-        expression:`(() => { if (!(${auditUrlAllowed.toString()})(${JSON.stringify(service)}, location.href, ${JSON.stringify(url)})) return {status:"stopped",stop_reason:"url_mismatch"}; return (${auditProject.toString()})(${JSON.stringify(service)}); })()`,
-        returnByValue:true, awaitPromise:false,
-        timeout:1000, silent:true, allowUnsafeEvalBlockedByCSP:false,
+      const { frameTree } = await chrome.debugger.sendCommand({ tabId }, "Page.getFrameTree");
+      if (typeof frameTree?.frame?.id !== "string" || !frameTree.frame.id) throw new Error("No audit frame");
+      const { executionContextId } = await chrome.debugger.sendCommand({ tabId }, "Page.createIsolatedWorld", {
+        frameId:frameTree.frame.id, worldName:"chrome-ops-audit",
       });
-      const current = await chrome.tabs.get(tabId);
-      if (!auditUrlAllowed(service, current.url, url) || (current.pendingUrl && !auditUrlAllowed(service, current.pendingUrl, url))) result = unconfirmed("url_mismatch");
-      else if (evaluated.exceptionDetails || !evaluated.result ||
-               !Object.hasOwn(evaluated.result, "value") || evaluated.result.subtype === "promise") result = unconfirmed("page_shape_changed");
-      else result = await auditResult(service, evaluated.result.value);
+      if (!Number.isInteger(executionContextId) || executionContextId <= 0) throw new Error("No isolated audit context");
+      for (;;) {
+        const evaluated = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+          // The guard executes in the same document as the fixed projection.
+          // URL checks before/after alone leave a navigation race.
+          expression:`(() => { if (!(${auditUrlAllowed.toString()})(${JSON.stringify(service)}, location.href, ${JSON.stringify(url)})) return {status:"stopped",stop_reason:"url_mismatch"}; return (${auditProject.toString()})(${JSON.stringify(service)}); })()`,
+          contextId:executionContextId, returnByValue:true, awaitPromise:false,
+          timeout:1000, silent:true, allowUnsafeEvalBlockedByCSP:false,
+        });
+        const current = await chrome.tabs.get(tabId);
+        if (!auditUrlAllowed(service, current.url, url) || (current.pendingUrl && !auditUrlAllowed(service, current.pendingUrl, url))) result = unconfirmed("url_mismatch");
+        else if (evaluated.exceptionDetails || !evaluated.result ||
+                 !Object.hasOwn(evaluated.result, "value") || evaluated.result.subtype === "promise") result = unconfirmed("page_shape_changed");
+        else result = await auditResult(service, evaluated.result.value);
+        // "complete" is a document load state, not an SPA inventory-ready signal.
+        // Retry only an unrecognized/missing shape or identity; URL/login stops
+        // remain immediate, and every projection checks identity before items.
+        if (!["page_shape_changed", "account_unknown"].includes(result.stop_reason) || Date.now() + 500 >= deadline) break;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
     }
   } catch {
     // Never forward CDP exception text, page content, or browser API errors.
