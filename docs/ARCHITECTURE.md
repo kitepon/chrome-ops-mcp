@@ -19,6 +19,13 @@ Paths passed to `load` must resolve to a directory containing `manifest.json`. T
 
 ## Chrome-side tools
 
+The separate account-audit entry (`bin/audit-read.js` → `src/audit-read.ts`) sends
+only `audit.read({service})` to the local Host. The Bridge owns fixed URLs and
+read projections, uses a new background tab, evaluates without enabling capture,
+and closes only its new tab. This entry starts no MCP server and adds no MCP
+tool. Failed cleanup retains tab IDs only in `storage.session`. The output and
+failure contract are documented in [`AUDIT_READ.md`](AUDIT_READ.md).
+
 The extension remains responsible for tabs, CDP attach/detach, Runtime, Console, Network, WebSocket/SSE, installed-extension metadata, and supported Chrome settings.
 
 Network secrets are redacted before crossing from the extension to the MCP process.

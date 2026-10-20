@@ -12,6 +12,12 @@ export class ChromeBridgeClient {
     ws.on("message",raw=>this.onMessage(raw.toString()));
   }
   connected(){return this.socket?.readyState===WebSocket.OPEN}
+  close(){
+    for(const pending of this.pending.values()){
+      clearTimeout(pending.timer); pending.reject(new Error("Chrome Ops client closed"));
+    }
+    this.pending.clear(); this.socket?.terminate(); this.socket=undefined;
+  }
   async status(){try{await this.connect();return await this.call("host.status")}catch{return{connected:false,host:false}}}
   async call(method:string,params?:unknown,timeoutMs=15000):Promise<unknown>{
     await this.connect(); const id=randomUUID();

@@ -29,6 +29,14 @@ On Windows the harness CLIs are often npm shims. The Windows OS adapter runs the
 
 `npm run doctor` shows `detected`, `registered`, and any error per harness.
 
+On macOS, Homebrew Node registrations and the Host LaunchAgent use the stable
+`/opt/homebrew/opt/node/bin/node` path (or `/usr/local/opt/node/bin/node` on Intel).
+Versioned formulas keep their formula name, such as `opt/node@22/bin/node`.
+The version-specific `Cellar` path returned by `process.execPath` is not saved,
+because Homebrew can remove it during an upgrade. Existing registrations with a
+removed Cellar path need their command changed to the corresponding `opt` path;
+keep all arguments and enabled/disabled settings intact.
+
 ## Checking a harness
 
 | Harness | Check |

@@ -13,6 +13,13 @@ Chrome Ops is intentionally powerful developer tooling. The Chrome extension can
 
 ## Important limitation
 
+The separate `bin/audit-read.js` entry accepts only fixed audit service names,
+uses Bridge-owned read projections and new background tabs, and enables no
+Runtime/Log/Network event capture. It closes its own tabs and retains only failed
+cleanup IDs in `storage.session`. It exposes no MCP tools and is intended for a
+restricted SSH key, not as a sandbox for an unrestricted SSH account. See
+[`docs/AUDIT_READ.md`](docs/AUDIT_READ.md) for its data and lifecycle boundaries.
+
 `network_response_body` intentionally returns captured response bodies. Application payloads can themselves contain API keys, tokens, personal data, or other secrets. Chrome Ops does **not** attempt to guess and redact arbitrary secrets inside response bodies. Use the tool only on applications and sessions whose data you are authorized to inspect.
 
 ## Reporting

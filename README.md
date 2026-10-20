@@ -50,7 +50,7 @@ npm run doctor
 
 Registration backs up the harness configuration before a change and refuses to replace a different `chrome-ops` entry. Restart or reload the harness if it does not discover the new server immediately. `npm run doctor` reports the Host service, the Bridge connection, developer-operation readiness, and the registration state of each harness. `npm run uninstall` stops and removes the Host service (and on Linux the development Chrome service and launcher); it leaves the Bridge extension, the Linux development Chrome profile, and harness registrations in place.
 
-Registrations point at the absolute path of the current Node executable and of `dist/index.js` in this checkout. Moving the checkout or changing Node requires registering again.
+Registrations point at the absolute path of the current Node executable and of `dist/index.js` in this checkout. Homebrew Node uses the formula's stable `opt` path. Moving the checkout or changing Node installations requires registering again.
 
 Logs: macOS writes the Host log to `~/Library/Logs/ChromeOps/`; Linux uses `journalctl --user -u chrome-ops-host` and `journalctl --user -u chrome-ops-chrome`. Backups of harness configuration go to `~/Library/Application Support/ChromeOps/backups` (macOS), `%LOCALAPPDATA%\ChromeOps\backups` (Windows), or `${XDG_STATE_HOME:-~/.local/state}/chrome-ops/backups` (Linux).
 
@@ -106,3 +106,11 @@ Chrome's public `chrome.management` extension API can inspect installed extensio
 - On Linux the developer operations and every other tool act on the development Chrome, not on your everyday Chrome.
 - On macOS and Windows, each unpacked-extension developer operation prepares its own management tab in the connected Bridge profile. Load verifies the new development extension through Chrome's management API before returning `verifiedLoaded: true`. Reload reports UI submission; check an observable version or behavior change. Remove verifies absence through Chrome's management API.
 - Each OS was verified on one machine and Chrome installation.
+
+### Restricted account-audit entry
+
+`node bin/audit-read.js` reads one fixed service name from stdin and returns one
+bounded JSON result. It opens and closes only its own background tab and enables
+no Runtime/Log/Network event streams. It exposes no MCP tools. See
+[the audit contract](docs/AUDIT_READ.md) for supported services, account checks,
+unconfirmed fields, SSH integration and synthetic-page tests.
