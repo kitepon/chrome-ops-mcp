@@ -50,11 +50,14 @@ existing capture caches. Normal developer capture remains available elsewhere.
 No window is created or focused. No click, input, page reload, DOM write, fetch,
 account mutation, or permission revocation is performed. Page loads still make
 the site's normal requests, and Chrome may display its debugger indicator.
-There is one concurrent audit; another is `stopped/busy`. Slow page loads stop
-after about six seconds. A loaded SPA can still be rendering, so missing
+There is one concurrent audit; another is `stopped/busy`. The allowed document
+URL must first commit. The audit then reads the fixed DOM while images or other
+subresources may still be loading; `tabs.status === "complete"` is not required.
+A loaded SPA can still be rendering, so missing
 identity/shape is retried within an approximately 11-second total Bridge budget,
 inside the existing Host's 15-second request deadline;
-the entry also has a 30-second overall deadline.
+the entry also has a 30-second overall deadline. This is an outer cap, not a
+minimum wait: connection, document-commit and read budgets can stop earlier.
 
 If closing fails, the result is `stopped/cleanup_failed`, with nonzero exit code
 and no account/items. Only numeric tab IDs are retained in `storage.session` for

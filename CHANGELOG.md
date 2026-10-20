@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2-alpha.0
+
+- Start the fixed isolated DOM read after the allowed URL commits, without
+  waiting for images and other subresources to finish. A ready inventory can be
+  read while Chrome still reports the tab as loading. Blank/uncommitted pages
+  remain unread, and redirect checks and cleanup are preserved.
+- Add real Chrome regressions with never-finishing image responses for both
+  Google audit services. Keep the existing total and internal time limits.
+
 ## 0.5.1-alpha.0
 
 - Read current Google Linked apps, Cloud account/tree-grid, X settings-card and

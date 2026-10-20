@@ -105,6 +105,17 @@ test('Cloud organization-only shells remain unconfirmed until project rows arriv
   let count=0,f;f=fixture({html:shell,evaluating(){if(++count===2)f.options.html=loaded;}});
   const result=await f.read('google-cloud-projects');assert.equal(result.status,'ok');assert.equal(result.item_count,1);assert.equal(count,2);
 });
+test('reads ready inventory while subresources are still loading',async()=>{
+  for(const service of ['google-connections','google-cloud-projects']){
+    const f=fixture({tab:{status:'loading'}}),r=await f.read(service);
+    assert.equal(r.status,'ok');assert.equal(r.item_count,1);assert.deepEqual([...f.tabs.keys()],[1]);
+  }
+});
+test('an uncommitted blank document is never evaluated as the service page',async()=>{
+  const f=fixture({tab:{url:'about:blank',pendingUrl:urls['google-connections'],status:'loading'}});
+  assert.equal((await f.read('google-connections')).stop_reason,'timeout');
+  assert.ok(!f.calls.some(c=>c[0]==='command'));assert.deepEqual([...f.tabs.keys()],[1]);
+});
 test('unknown/prototype services and arbitrary URL/JS arguments are refused',async()=>{
   const f=fixture();
   for(const p of [{service:'__proto__'},{service:'constructor'},{service:'id'},{service:'google-connections',url:'https://evil.invalid'},{service:'google-connections',expression:'1'}])await assert.rejects(f.dispatch('audit.read',p));
@@ -119,7 +130,7 @@ test('URL query allowlists reject lookalike origins, duplicates, fragments and n
   assert.equal(allowed('google-cloud-projects',urls['google-cloud-projects']+'?project=a%2Fb'),false);
 });
 test('redirect, page timeout, evaluation failure and exception always close only the new tab',async()=>{
-  for(const options of [{tab:{url:'https://accounts.google.com/login'}},{tab:{pendingUrl:'https://evil.invalid'}},{tab:{status:'loading'}},{failEvaluate:true},{exception:true},{failAttach:true},{failWorld:true},{missingWorld:true}]){
+  for(const options of [{tab:{url:'https://accounts.google.com/login'}},{tab:{pendingUrl:'https://evil.invalid'}},{tab:{url:'',status:'loading'}},{failEvaluate:true},{exception:true},{failAttach:true},{failWorld:true},{missingWorld:true}]){
     const f=fixture(options),r=await f.read('google-connections');
     assert.equal(r.status,'stopped');assert.deepEqual([...f.tabs.keys()],[1]);assert.ok(!JSON.stringify(r).includes('SECRET'));
     if(options.missingWorld)assert.ok(!f.calls.some(c=>c[0]==='command'&&c[1]==='Runtime.evaluate'));

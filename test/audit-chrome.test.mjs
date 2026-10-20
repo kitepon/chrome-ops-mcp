@@ -20,13 +20,15 @@ test('real Chrome: fixed background audit tabs, guarded Runtime-only reads, no c
   const key=join(dir,'key.pem'),cert=join(dir,'cert.pem');
   const openssl=process.env.CHROME_OPS_AUDIT_TEST_OPENSSL??(process.platform==='win32'?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl');
   assert.equal(spawnSync(openssl,['req','-x509','-newkey','rsa:2048','-keyout',key,'-out',cert,'-nodes','-subj','/CN=chrome-ops-synthetic.invalid','-days','1'],{stdio:'ignore'}).status,0,'test certificate generation');
-  let service,mode='ok',layout='legacy';
+  let service,mode='ok',layout='legacy',pendingResources=0;
   const sockets=new Set();
   const pages=httpsServer({key:readFileSync(key),cert:readFileSync(cert)},(req,res)=>{
     const host=req.headers.host?.split(':')[0];
     if(!['myaccount.google.com','console.cloud.google.com','x.com','discord.com','accounts.google.com'].includes(host)){res.writeHead(404).end();return;}
+    if(req.url==='/fixture-slow.png'){pendingResources++;return;}
     if(mode==='redirect'&&host!=='accounts.google.com'){res.writeHead(302,{Location:'https://accounts.google.com/'}).end();return;}
     let html=layout==='legacy'?auditPage(service):auditCurrentPage(service);
+    if(mode==='pending-resource')html+='<img src="/fixture-slow.png" alt="">';
     if(mode==='poison')html+='<script>window.URL=class {constructor(){throw Error("page URL trap")}};Document.prototype.querySelector=Document.prototype.querySelectorAll=Element.prototype.querySelector=Element.prototype.querySelectorAll=function(){throw Error("page DOM trap")};</script>';
     if(mode==='hydration')html=`<main></main><script>setTimeout(()=>{document.body.innerHTML=${JSON.stringify(html)}},650)</script>`;
     if(mode==='cloud-hydration'){
@@ -86,6 +88,13 @@ test('real Chrome: fixed background audit tabs, guarded Runtime-only reads, no c
     assert.equal(result.status,'ok',`${mode}: ${result.stop_reason}`);assert.equal(result.item_count,1);
     assert.deepEqual(await call('tabs.list'),before);
   }
+  mode='pending-resource';
+  for(service of ['google-connections','google-cloud-projects']){
+    const result=await call('audit.read',{service});
+    assert.equal(result.status,'ok',`${service} pending image: ${result.stop_reason}`);assert.equal(result.item_count,1);
+    assert.deepEqual(await call('tabs.list'),before);
+  }
+  assert.ok(pendingResources>=2,'both fixture images stayed pending');
   for(mode of ['redirect','login']){
     service='google-connections';const result=await call('audit.read',{service});
     assert.equal(result.status,'stopped');assert.equal(result.stop_reason,mode==='redirect'?'redirect':'login_required');assert.deepEqual(await call('tabs.list'),before);
