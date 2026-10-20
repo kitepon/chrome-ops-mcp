@@ -18,4 +18,6 @@ const exports={ChromeBridgeClient:class {
       items:[],item_count:0,truncated:false,unconfirmed:[]};
   }
 }};
-mock.module(new URL('../../dist/bridge.js',import.meta.url).href,Number(process.versions.node.split('.')[0])<24?{namedExports:exports}:{exports});
+// Early Node 24 releases (including Cursor's 24.5 runtime) use namedExports.
+// It remains supported on current Node; the major version alone is insufficient.
+mock.module(new URL('../../dist/bridge.js',import.meta.url).href,{namedExports:exports});
