@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {webcrypto, createHash} from 'node:crypto';
 import {parseHTML} from 'linkedom';
-import {auditPage, auditCurrentPage, googleAccount} from './fixtures/audit-pages.mjs';
+import {auditPage, auditCurrentPage, cloudCollapsedPage, googleAccount} from './fixtures/audit-pages.mjs';
 
 const source = readFileSync(new URL('../extension/service-worker.js', import.meta.url), 'utf8');
 const urls = {
@@ -49,6 +49,7 @@ function fixture(options = {}) {
         const service=Object.keys(urls).find(key=>urls[key]===tabs.get(target.tabId).url);
         const {document}=parseHTML(options.html ?? auditPage(service, options.count ?? 1));
         for(const input of document.querySelectorAll('input, textarea'))Object.defineProperty(input,'value',{get(){throw Error('Input values must not be read');}});
+        for(const button of document.querySelectorAll('button'))button.addEventListener('click',()=>{calls.push(['ui-click',button.id]);options.clicked?.(button.id);});
         const location=new URL(options.documentUrl ?? tabs.get(target.tabId).url);
         const value=vm.runInNewContext(params.expression,{document,location,URL});
         if(options.navigateAfter)options.tab={url:options.navigateAfter};
@@ -199,4 +200,22 @@ test('pending ID-only recovery survives a worker restart; removed tabs do not be
 });
 test('hidden inventory rows do not become visible app results',async()=>{
   const html=auditPage('google-connections').replace('<li>','<li hidden>');const r=await fixture({html}).read('google-connections');assert.equal(r.status,'ok');assert.equal(r.item_count,0);
+});
+
+test('Cloud expands only the unique No organization control once, never Delete',async()=>{
+ let f;f=fixture({html:cloudCollapsedPage().replace('Expand this row','ノードを切り替える'),clicked(id){assert.equal(id,'fixture-expand');f.options.html=cloudCollapsedPage({expanded:true});}});
+ const r=await f.read('google-cloud-projects');assert.equal(r.status,'ok');assert.equal(r.item_count,1);
+ assert.deepEqual(f.calls.filter(c=>c[0]==='ui-click'),[['ui-click','fixture-expand']]);assert.deepEqual([...f.tabs.keys()],[1]);
+});
+test('Cloud expansion ambiguity, unsafe controls and missing child rows never become empty success',async()=>{
+ const base=cloudCollapsedPage();
+ for(const html of [cloudCollapsedPage({ambiguous:true}),base.replace('aria-label="Expand this row"','aria-label="Delete"'),base.replace('aria-label="Expand this row"','aria-label="Delete and expand"'),base.replace('type="button" aria-label="Expand','type="submit" aria-label="Expand'),base.replace('id="fixture-expand"','disabled id="fixture-expand"'),base.replace('id="fixture-expand"','aria-haspopup="menu" id="fixture-expand"')]){
+  const f=fixture({html}),r=await f.read('google-cloud-projects');assert.equal(r.status,'stopped');assert.equal(r.item_count,0);assert.equal(f.calls.filter(c=>c[0]==='ui-click').length,0);assert.deepEqual([...f.tabs.keys()],[1]);
+ }
+ const missing=fixture({html:base});assert.equal((await missing.read('google-cloud-projects')).status,'stopped');assert.equal(missing.calls.filter(c=>c[0]==='ui-click').length,1,'never retry the expansion action');
+});
+test('Cloud account changes after expansion stop before returning any project',async()=>{
+ let f;f=fixture({html:cloudCollapsedPage(),clicked(){f.options.html=cloudCollapsedPage({expanded:true}).replace('Audit@EXAMPLE.test','other@example.test');}});
+ const r=await f.read('google-cloud-projects');assert.equal(r.status,'stopped');assert.equal(r.stop_reason,'account_unknown');assert.equal(r.account,null);assert.equal(r.items.length,0);
+ assert.equal(f.calls.filter(c=>c[0]==='ui-click').length,1);assert.deepEqual([...f.tabs.keys()],[1]);assert.ok(!JSON.stringify(r).includes('other@example.test'));
 });

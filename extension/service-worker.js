@@ -31,7 +31,7 @@ function auditUrlAllowed(service, href, entry) {
 // This function is serialized into Runtime.evaluate; it has no extension-side
 // dependencies. Only named DOM fields are read, never a document/body dump or
 // input/textarea values. Unknown layouts deliberately stop the audit.
-function auditProject(service) {
+function auditProject(service, allowCloudExpansion = false, cloudAccount = null) {
   const stopped = stop_reason => ({ status:"stopped", stop_reason });
   const visible = node => !!node && !node.closest('[hidden], [aria-hidden="true"]') &&
     (typeof node.getClientRects !== "function" || node.getClientRects().length > 0);
@@ -58,6 +58,7 @@ function auditProject(service) {
     const emails = new Set([...buttons].filter(visible).map(button => label(button)?.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]?.toLowerCase()).filter(Boolean));
     if (emails.size !== 1) return stopped("account_unknown");
     account = { email:[...emails][0] };
+    if (service === "google-cloud-projects" && cloudAccount !== null && account.email !== cloudAccount) return { ...stopped("account_unknown"), account_changed:true };
   }
   if (service === "x-connected-apps") {
     const button = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
@@ -135,7 +136,26 @@ function auditProject(service) {
     }
     // The tree initially renders only its organization root while projects are
     // still being fetched. That shell is not proof of an empty inventory.
-    if (!items.length && (table.closest('[role="treegrid"], cfc-tree-grid') || table.matches('[role="treegrid"]'))) return stopped("page_shape_changed");
+    if (!items.length && (table.closest('[role="treegrid"], cfc-tree-grid') || table.matches('[role="treegrid"]'))) {
+      if (allowCloudExpansion) {
+        const rows = [...table.querySelectorAll('tbody tr[aria-expanded="false"]')].filter(row => {
+          const cells = [...row.querySelectorAll('td, [role="gridcell"]')];
+          return visible(row) && /^(No organization|組織なし)$/i.test(text(cells[columns.name]) || "") && !text(cells[columns.project_id]);
+        });
+        if (rows.length) {
+          const buttons = rows.length === 1 ? [...rows[0].querySelectorAll('button[type="button"][aria-expanded="false"]:not([aria-haspopup])')].filter(button =>
+            visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true" &&
+            !button.closest("form, [inert]") && button.closest("tr") === rows[0] &&
+            /^(Toggle node|ノードを切り替える|Expand this row|Expand row)$/i.test(label(button) || "")) : [];
+          if (buttons.length !== 1) return { ...stopped("page_shape_changed"), expansion_denied:true };
+          // The one agreed UI-only exception: expand this owned audit tab's
+          // No organization row. Never select a project, checkbox, or menu.
+          buttons[0].click();
+          return { ...stopped("page_shape_changed"), audit_expanded:true, account };
+        }
+      }
+      return stopped("page_shape_changed");
+    }
     add("organization", "needs_click"); add("pagination", "needs_click");
     if (items.some(item => !item.state)) add("state", "not_found");
   } else {
@@ -261,14 +281,21 @@ async function auditRead(p) {
         frameId:frameTree.frame.id, worldName:"chrome-ops-audit",
       });
       if (!Number.isInteger(executionContextId) || executionContextId <= 0) throw new Error("No isolated audit context");
+      let cloudExpanded = false;
+      let cloudAccount = null;
       for (;;) {
         const evaluated = await chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
           // The guard executes in the same document as the fixed projection.
           // URL checks before/after alone leave a navigation race.
-          expression:`(() => { if (!(${auditUrlAllowed.toString()})(${JSON.stringify(service)}, location.href, ${JSON.stringify(url)})) return {status:"stopped",stop_reason:"url_mismatch"}; return (${auditProject.toString()})(${JSON.stringify(service)}); })()`,
+          expression:`(() => { if (!(${auditUrlAllowed.toString()})(${JSON.stringify(service)}, location.href, ${JSON.stringify(url)})) return {status:"stopped",stop_reason:"url_mismatch"}; return (${auditProject.toString()})(${JSON.stringify(service)},${service === "google-cloud-projects" && !cloudExpanded},${JSON.stringify(cloudAccount)}); })()`,
           contextId:executionContextId, returnByValue:true, awaitPromise:false,
           timeout:1000, silent:true, allowUnsafeEvalBlockedByCSP:false,
         });
+        if (evaluated.result?.value?.audit_expanded === true) {
+          cloudExpanded = true;
+          cloudAccount = evaluated.result.value.account?.email;
+          if (typeof cloudAccount !== "string") throw new Error("No expanded audit account");
+        }
         const current = await chrome.tabs.get(tabId);
         if (!auditUrlAllowed(service, current.url, url) || (current.pendingUrl && !auditUrlAllowed(service, current.pendingUrl, url))) result = unconfirmed("url_mismatch");
         else if (evaluated.exceptionDetails || !evaluated.result ||
@@ -277,7 +304,7 @@ async function auditRead(p) {
         // "complete" is a document load state, not an SPA inventory-ready signal.
         // Retry only an unrecognized/missing shape or identity; URL/login stops
         // remain immediate, and every projection checks identity before items.
-        if (!["page_shape_changed", "account_unknown"].includes(result.stop_reason) || Date.now() + 500 >= deadline) break;
+        if (evaluated.result?.value?.expansion_denied === true || evaluated.result?.value?.account_changed === true || !["page_shape_changed", "account_unknown"].includes(result.stop_reason) || Date.now() + 500 >= deadline) break;
         await new Promise(resolve => setTimeout(resolve, 250));
       }
     }

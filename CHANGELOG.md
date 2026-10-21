@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3-alpha.0
+
+- Read Cloud project rows behind the collapsed No organization branch by allowing
+  one strictly scoped tree expansion in the audit-owned background tab. Refuse
+  ambiguous controls and keep empty/unknown trees unconfirmed. No project
+  selection or URL/query permission is added.
+- Verify the expansion action is recorded once and the adjacent Delete action
+  remains unrecorded, including an independent recorder positive control.
+
 ## 0.5.2-alpha.0
 
 - Start the fixed isolated DOM read after the allowed URL commits, without
