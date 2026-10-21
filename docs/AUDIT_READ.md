@@ -47,10 +47,24 @@ Runtime/Log/Network event streams. General tab/DevTools requests cannot target a
 active audit tab, and audit events, including late events, are excluded from the
 existing capture caches. Normal developer capture remains available elsewhere.
 
-No window is created or focused. No click, input, page reload, DOM write, fetch,
+No window is created or focused. No input, page reload, DOM write, fetch,
 account mutation, or permission revocation is performed. Page loads still make
 the site's normal requests, and Chrome may display its debugger indicator.
-There is one concurrent audit; another is `stopped/busy`. The allowed document
+There is one concurrent audit; another is `stopped/busy`.
+
+The only click exception is a single Cloud tree expansion in the audit's own tab.
+If a recognized project table contains only an unexpanded `No organization` /
+`組織なし` branch, the reader may press its one visible, enabled native
+`button[type="button"][aria-expanded="false"]` with no `aria-haspopup` and no
+form/inert ancestor. The row must have that exact name and an empty ID, and both
+the matching row and button must be unique. The button's action label must be a
+recognized tree-expansion label (`Toggle node`, `ノードを切り替える`, `Expand this
+row`, or `Expand row`). Ambiguity stops without pressing anything. Only one
+expansion is attempted per call, even if the page delays changing its state.
+No checkbox, project selector, menu, delete, restore, or permission control is
+pressed. If project rows do not appear, the audit remains stopped rather than
+reporting a confirmed empty list. URL/account checks precede the operation;
+the existing post-read checks and cleanup still apply. The allowed document
 URL must first commit. The audit then reads the fixed DOM while images or other
 subresources may still be loading; `tabs.status === "complete"` is not required.
 A loaded SPA can still be rendering, so missing

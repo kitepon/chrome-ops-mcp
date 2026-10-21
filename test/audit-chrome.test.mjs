@@ -11,7 +11,7 @@ import {createServer as httpServer} from 'node:http';
 import {createServer as httpsServer} from 'node:https';
 import {WebSocketServer,WebSocket} from 'ws';
 import net from 'node:net';
-import {auditPage,auditCurrentPage} from './fixtures/audit-pages.mjs';
+import {auditPage,auditCurrentPage,cloudCollapsedPage} from './fixtures/audit-pages.mjs';
 const binary=process.env.CHROME_OPS_AUDIT_TEST_CHROME;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -20,14 +20,26 @@ test('real Chrome: fixed background audit tabs, guarded Runtime-only reads, no c
   const key=join(dir,'key.pem'),cert=join(dir,'cert.pem');
   const openssl=process.env.CHROME_OPS_AUDIT_TEST_OPENSSL??(process.platform==='win32'?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl');
   assert.equal(spawnSync(openssl,['req','-x509','-newkey','rsa:2048','-keyout',key,'-out',cert,'-nodes','-subj','/CN=chrome-ops-synthetic.invalid','-days','1'],{stdio:'ignore'}).status,0,'test certificate generation');
-  let service,mode='ok',layout='legacy',pendingResources=0;
+  let service,mode='ok',layout='legacy',pendingResources=0,expandedActions=0,deletedActions=0;
   const sockets=new Set();
   const pages=httpsServer({key:readFileSync(key),cert:readFileSync(cert)},(req,res)=>{
     const host=req.headers.host?.split(':')[0];
     if(!['myaccount.google.com','console.cloud.google.com','x.com','discord.com','accounts.google.com'].includes(host)){res.writeHead(404).end();return;}
+    if(req.url==='/fixture-expanded'){expandedActions++;res.writeHead(204).end();return;}
+    if(req.url==='/fixture-deleted'){deletedActions++;res.writeHead(204).end();return;}
     if(req.url==='/fixture-slow.png'){pendingResources++;return;}
     if(mode==='redirect'&&host!=='accounts.google.com'){res.writeHead(302,{Location:'https://accounts.google.com/'}).end();return;}
     let html=layout==='legacy'?auditPage(service):auditCurrentPage(service);
+    if(mode.startsWith('cloud-collapsed')||req.url==='/fixture-cloud-control'){
+      html=cloudCollapsedPage({ambiguous:mode==='cloud-collapsed-ambiguous'});
+      html+=`<script>document.addEventListener('click',event=>{
+        if(event.target.closest('#fixture-delete'))fetch('/fixture-deleted',{method:'POST'});
+        if(event.target.closest('#fixture-expand,#fixture-other-expand')){
+          fetch('/fixture-expanded',{method:'POST'});
+          document.body.innerHTML=${JSON.stringify(cloudCollapsedPage({expanded:true}))};
+        }
+      });</script>`;
+    }
     if(mode==='pending-resource')html+='<img src="/fixture-slow.png" alt="">';
     if(mode==='poison')html+='<script>window.URL=class {constructor(){throw Error("page URL trap")}};Document.prototype.querySelector=Document.prototype.querySelectorAll=Element.prototype.querySelector=Element.prototype.querySelectorAll=function(){throw Error("page DOM trap")};</script>';
     if(mode==='hydration')html=`<main></main><script>setTimeout(()=>{document.body.innerHTML=${JSON.stringify(html)}},650)</script>`;
@@ -99,10 +111,27 @@ test('real Chrome: fixed background audit tabs, guarded Runtime-only reads, no c
     service='google-connections';const result=await call('audit.read',{service});
     assert.equal(result.status,'stopped');assert.equal(result.stop_reason,mode==='redirect'?'redirect':'login_required');assert.deepEqual(await call('tabs.list'),before);
   }
+  service='google-cloud-projects';mode='cloud-collapsed';
+  const expanded=await call('audit.read',{service});assert.equal(expanded.status,'ok');assert.equal(expanded.item_count,1);
+  assert.equal(expandedActions,1);assert.equal(deletedActions,0);assert.deepEqual(await call('tabs.list'),before);
+  mode='cloud-collapsed-ambiguous';
+  const ambiguous=await call('audit.read',{service});assert.equal(ambiguous.status,'stopped');assert.equal(ambiguous.stop_reason,'page_shape_changed');
+  assert.equal(expandedActions,1,'ambiguous controls are never pressed');assert.equal(deletedActions,0);assert.deepEqual(await call('tabs.list'),before);
   const caches=await call('test.auditCaches');
   assert.deepEqual({...caches,commands:[]},{console:0,network:0,requests:0,pending:0,commands:[]});
   assert.ok(caches.commands.includes('Page.createIsolatedWorld'));
   assert.ok(caches.commands.every(method=>['Page.getFrameTree','Page.createIsolatedWorld','Runtime.evaluate'].includes(method)),JSON.stringify(caches.commands));
+  // Separate synthetic positive control, never part of the production reader.
+  const {targetId}=await send('Target.createTarget',{url:'https://console.cloud.google.com/fixture-cloud-control'});
+  const {sessionId}=await send('Target.attachToTarget',{targetId,flatten:true});
+  for(let i=0;i<100;i++){
+    const p=await send('Runtime.evaluate',{expression:'!!document.getElementById("fixture-delete")',returnByValue:true},sessionId);
+    if(p.result.value)break;await sleep(20);
+  }
+  await send('Runtime.evaluate',{expression:'document.getElementById("fixture-delete").click()'},sessionId);
+  for(let i=0;i<100&&!deletedActions;i++)await sleep(20);
+  assert.equal(deletedActions,1,'separate positive control proves the Delete recorder works');
+  await send('Target.closeTarget',{targetId});
   await verifyMultiBridge();
   assert.deepEqual(await call('tabs.list'),before,'multiple profiles stop before opening any audit tab');
 });
