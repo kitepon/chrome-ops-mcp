@@ -18,6 +18,16 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run test:unit
+        env:
+          CHROME_OPS_TEST_FAILURE_DIR: ${{ runner.temp }}/chrome-ops-startup-failure
+          CHROME_OPS_TEST_STRACE: ${{ runner.os == 'Linux' && matrix.node == 24 && '1' || '0' }}
+      - uses: actions/upload-artifact@v7
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: linux-startup-${{ matrix.node }}
+          path: ${{ runner.temp }}/chrome-ops-startup-failure/
+          if-no-files-found: ignore
+          retention-days: 7
       - if: runner.os == 'macOS'
         run: swift build --package-path helper/macos -c release
       - run: npm audit --omit=dev

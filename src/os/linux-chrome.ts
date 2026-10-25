@@ -11,15 +11,34 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const extensionId = /^[a-p]{32}$/;
 
 class DevTools {
+  private closed: Error | undefined;
+  close(error: Error) {
+    if (this.closed) return;
+    this.closed = error;
+    for (const waiter of this.waiting.values()) { clearTimeout(waiter.timer); waiter.reject(error); }
+    this.waiting.clear();
+    this.input.destroy();
+    this.output.destroy();
+  }
   private next = 1;
   private buffer = "";
   private waiting = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
-  constructor(private input: Writable, output: Readable) {
+  constructor(private input: Writable, private output: Readable) {
+    input.on("error", error => this.close(error));
+    output.on("error", error => this.close(error));
+    output.on("end", () => this.close(new Error("Chrome DevTools pipe ended")));
+    output.on("close", () => this.close(new Error("Chrome DevTools pipe closed")));
     output.setEncoding("utf8");
     output.on("data", (chunk: string) => {
+      if (this.closed) return;
       this.buffer += chunk;
       for (let end = this.buffer.indexOf("\0"); end >= 0; end = this.buffer.indexOf("\0")) {
-        const message = JSON.parse(this.buffer.slice(0, end));
+        let message;
+        try {
+          message = JSON.parse(this.buffer.slice(0, end));
+          if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid Chrome DevTools reply");
+        }
+        catch (error) { this.close(error as Error); return; }
         this.buffer = this.buffer.slice(end + 1);
         const waiter = this.waiting.get(message.id);
         if (!waiter) continue;
@@ -30,11 +49,14 @@ class DevTools {
     });
   }
   send(method: string, params: object = {}, sessionId?: string): Promise<any> {
+    if (this.closed) return Promise.reject(this.closed);
     const id = this.next++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.waiting.delete(id); reject(new Error(`Chrome did not answer ${method}`)); }, 15000);
       this.waiting.set(id, { resolve, reject, timer });
-      this.input.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
+      this.input.write(`${JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })}\0`, error => {
+        if (error) this.close(error);
+      });
     });
   }
 }
@@ -112,31 +134,73 @@ function serve(socket: Socket, handle: (operation: string, value: string) => Pro
   socket.on("error", () => undefined);
 }
 
-const binary = chromeBinary();
-if (!binary) throw new Error("Google Chrome or Chromium was not found; set CHROME_OPS_CHROME_BINARY");
-mkdirSync(profileDir(), { recursive: true, mode: 0o700 });
-const extra = (process.env.CHROME_OPS_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean);
-const chrome = spawn(binary, [`--user-data-dir=${profileDir()}`, "--remote-debugging-pipe", "--enable-unsafe-extension-debugging",
-  "--no-first-run", "--no-default-browser-check", ...extra], { stdio: ["ignore", "inherit", "inherit", "pipe", "pipe"] });
-const devtools = new DevTools(chrome.stdio[3] as Writable, chrome.stdio[4] as Readable);
-const path = socketPath();
-chrome.on("exit", code => { rmSync(path, { force: true }); process.exit(code === 0 ? 0 : 1); });
-for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, () => chrome.kill("SIGTERM"));
+async function main() {
+  const binary = chromeBinary();
+  if (!binary) throw new Error("Google Chrome or Chromium was not found; set CHROME_OPS_CHROME_BINARY");
+  mkdirSync(profileDir(), { recursive: true, mode: 0o700 });
+  const extra = (process.env.CHROME_OPS_CHROME_ARGS ?? "").split(/\s+/).filter(Boolean);
+  const chrome = spawn(binary, [`--user-data-dir=${profileDir()}`, "--remote-debugging-pipe", "--enable-unsafe-extension-debugging",
+    "--no-first-run", "--no-default-browser-check", ...extra], { stdio: ["ignore", "inherit", "inherit", "pipe", "pipe"] });
+  const devtools = new DevTools(chrome.stdio[3] as Writable, chrome.stdio[4] as Readable);
+  const path = socketPath();
+  let closed = false;
+  const finished = new Promise<number | null>(resolve => chrome.once("close", code => { closed = true; resolve(code); }));
+  chrome.on("error", error => devtools.close(error));
+  chrome.on("exit", (code, signal) => devtools.close(new Error(`Chrome exited: code=${code}, signal=${signal}`)));
+  let stopping = false;
+  const stop = () => { stopping = true; chrome.kill("SIGTERM"); };
+  for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, stop);
+  let server: ReturnType<typeof createServer> | undefined;
+  let serverError: Error | undefined;
+  const clients = new Set<Socket>();
 
-await devtools.send("Browser.getVersion");
-// The Errors view only collects errors in developer mode.
-await onManagementPage(devtools, evaluate => evaluate("chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }).then(() => true)"));
-// Loading the Bridge again on every start also brings it up to date with this checkout.
-if (process.env.CHROME_OPS_LOAD_BRIDGE !== "0") await devtools.send("Extensions.loadUnpacked", { path: join(packageRoot, "extension") });
+  try {
+    await devtools.send("Browser.getVersion");
+    // The Errors view only collects errors in developer mode.
+    await onManagementPage(devtools, evaluate => evaluate("chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }).then(() => true)"));
+    // Loading the Bridge again on every start also brings it up to date with this checkout.
+    if (process.env.CHROME_OPS_LOAD_BRIDGE !== "0") await devtools.send("Extensions.loadUnpacked", { path: join(packageRoot, "extension") });
+    if (stopping || closed) throw new Error("Chrome stopped during startup");
 
-let queue: Promise<unknown> = Promise.resolve();
-const handle = (operation: string, value: string) => {
-  const result = queue.then(() => run(devtools, operation, value));
-  queue = result.catch(() => undefined);
-  return result;
-};
-mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-chmodSync(dirname(path), 0o700);
-rmSync(path, { force: true });
-const server = createServer(socket => serve(socket, handle));
-server.listen(path, () => { chmodSync(path, 0o600); console.error(`Chrome Ops development Chrome ready: ${path}`); });
+    let queue: Promise<unknown> = Promise.resolve();
+    const handle = (operation: string, value: string) => {
+      const result = queue.then(() => run(devtools, operation, value));
+      queue = result.catch(() => undefined);
+      return result;
+    };
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    chmodSync(dirname(path), 0o700);
+    rmSync(path, { force: true });
+    server = createServer(socket => {
+      clients.add(socket);
+      socket.once("close", () => clients.delete(socket));
+      serve(socket, handle);
+    });
+    server.on("error", error => { serverError = error; chrome.kill("SIGTERM"); });
+    await new Promise<void>((resolve, reject) => {
+      server!.once("error", reject);
+      server!.listen(path, () => {
+          try { chmodSync(path, 0o600); resolve(); } catch (error) { reject(error); }
+      });
+    });
+    console.error(`Chrome Ops development Chrome ready: ${path}`);
+    const code = await finished;
+    if (serverError) throw serverError;
+    if (!stopping && code !== 0) throw new Error(`Chrome exited with code ${code}`);
+  } catch (error) {
+    if (!stopping) throw error;
+  } finally {
+    for (const signal of ["SIGTERM", "SIGINT"] as const) process.off(signal, stop);
+    for (const client of clients) client.destroy();
+    if (server?.listening) await new Promise<void>(resolve => server!.close(() => resolve()));
+    devtools.close(new Error("Chrome supervisor stopped"));
+    if (!closed) chrome.kill("SIGTERM");
+    const forceStop = setTimeout(() => { if (!closed) chrome.kill("SIGKILL"); }, 5000);
+    forceStop.unref();
+    await finished;
+    clearTimeout(forceStop);
+    // server.close releases its socket; the path may already belong to a replacement.
+  }
+}
+
+await main().catch(error => { console.error(error); process.exitCode = 1; });
