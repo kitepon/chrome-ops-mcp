@@ -14,14 +14,27 @@ test("the Linux helper loads, reloads, reads errors from, and removes an unpacke
   const env = { ...process.env, CHROME_OPS_CHROME_PROFILE: join(dir, "profile"), CHROME_OPS_CHROME_SOCKET: join(dir, "run/chrome.sock"),
     CHROME_OPS_CHROME_ARGS: "--headless=new --no-sandbox", CHROME_OPS_LOAD_BRIDGE: "0" };
   const supervisor = spawn(process.execPath, ["dist/os/linux-chrome.js"], { env, stdio: ["ignore", "ignore", "pipe"] });
+  let diagnostics = "";
+  supervisor.stderr.setEncoding("utf8");
+  supervisor.stderr.on("data", chunk => { diagnostics = (diagnostics + chunk).slice(-65536); });
+  let closed = false;
+  let spawnError;
+  supervisor.on("error", error => { spawnError = error; });
+  const finished = new Promise(resolve => supervisor.once("close", () => { closed = true; resolve(); }));
+  const failure = () => `exit=${supervisor.exitCode}, signal=${supervisor.signalCode}, spawnError=${spawnError?.message ?? "none"}\n${diagnostics}`;
   t.after(async () => {
-    supervisor.kill("SIGTERM");
-    await new Promise(resolve => supervisor.exitCode === null ? supervisor.once("exit", resolve) : resolve());
+    if (!closed) supervisor.kill("SIGTERM");
+    await finished;
     // Chrome's helper processes can still be writing to the profile for a moment after the browser exits.
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    } catch (error) {
+      error.message += `\nSupervisor diagnostics: ${failure()}`;
+      throw error;
+    }
   });
-  for (let i = 0; i < 150 && !existsSync(env.CHROME_OPS_CHROME_SOCKET); i++) await new Promise(resolve => setTimeout(resolve, 200));
-  assert.ok(existsSync(env.CHROME_OPS_CHROME_SOCKET), "supervisor socket");
+  for (let i = 0; i < 150 && !existsSync(env.CHROME_OPS_CHROME_SOCKET) && !closed && !spawnError; i++) await new Promise(resolve => setTimeout(resolve, 200));
+  assert.ok(existsSync(env.CHROME_OPS_CHROME_SOCKET) && !closed && !spawnError, `supervisor socket; ${failure()}`);
 
   const fixture = join(dir, "throwing");
   mkdirSync(fixture);
