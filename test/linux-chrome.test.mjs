@@ -2,9 +2,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const { chromeBinary } = await import("../dist/os/linux-paths.js");
 const skip = process.platform !== "linux" ? "Linux only" : chromeBinary() ? false : "Chrome is not installed";
@@ -12,8 +12,8 @@ const skip = process.platform !== "linux" ? "Linux only" : chromeBinary() ? fals
 test("the Linux helper loads, reloads, reads errors from, and removes an unpacked extension", { skip, timeout: 120000 }, async t => {
   const dir = mkdtempSync(join(tmpdir(), "chrome-ops-linux-"));
   const env = { ...process.env, CHROME_OPS_CHROME_PROFILE: join(dir, "profile"), CHROME_OPS_CHROME_SOCKET: join(dir, "run/chrome.sock"),
-    CHROME_OPS_CHROME_ARGS: "--headless=new --no-sandbox", CHROME_OPS_LOAD_BRIDGE: "0" };
-  const supervisor = spawn(process.execPath, ["dist/os/linux-chrome.js"], { env, stdio: ["ignore", "ignore", "pipe"] });
+    CHROME_OPS_CHROME_ARGS: "--headless=new --no-sandbox", CHROME_OPS_LOAD_BRIDGE: "0", CHROME_OPS_TEST_DIAGNOSTICS: join(dir, "startup.json") };
+  const supervisor = spawn(process.execPath, ["--import", new URL("./support/linux-startup-observer.mjs", import.meta.url).href, "dist/os/linux-chrome.js"], { env, stdio: ["ignore", "ignore", "pipe"] });
   let diagnostics = "";
   supervisor.stderr.setEncoding("utf8");
   supervisor.stderr.on("data", chunk => { diagnostics = (diagnostics + chunk).slice(-65536); });
@@ -21,16 +21,35 @@ test("the Linux helper loads, reloads, reads errors from, and removes an unpacke
   let spawnError;
   supervisor.on("error", error => { spawnError = error; });
   const finished = new Promise(resolve => supervisor.once("close", () => { closed = true; resolve(); }));
-  const failure = () => `exit=${supervisor.exitCode}, signal=${supervisor.signalCode}, spawnError=${spawnError?.message ?? "none"}\n${diagnostics}`;
+  let passed = false;
+  const observation = () => {
+    try { return existsSync(env.CHROME_OPS_TEST_DIAGNOSTICS) ? readFileSync(env.CHROME_OPS_TEST_DIAGNOSTICS, "utf8") : "not saved"; }
+    catch (error) { return `unreadable (${error.code})`; }
+  };
+  const failure = () => `exit=${supervisor.exitCode}, signal=${supervisor.signalCode}, spawnError=${spawnError?.message ?? "none"}\n${diagnostics}\nStartup observation: ${observation()}`;
   t.after(async () => {
     if (!closed) supervisor.kill("SIGTERM");
     await finished;
-    // Chrome's helper processes can still be writing to the profile for a moment after the browser exits.
     try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      if (!passed && process.env.CHROME_OPS_TEST_FAILURE_DIR) {
+        const destination = resolve(process.env.CHROME_OPS_TEST_FAILURE_DIR);
+        mkdirSync(destination, { recursive: true });
+        for (const suffix of ["", ".strace"]) {
+          const source = env.CHROME_OPS_TEST_DIAGNOSTICS + suffix;
+          if (existsSync(source)) copyFileSync(source, join(destination, "startup.json" + suffix));
+        }
+      }
     } catch (error) {
-      error.message += `\nSupervisor diagnostics: ${failure()}`;
+      process.stderr.write(`Startup artifact retention failed (${error.code})\n`);
       throw error;
+    } finally {
+      // Chrome's helper processes can still be writing to the profile for a moment after the browser exits.
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+      } catch (error) {
+        error.message += `\nSupervisor diagnostics: ${failure()}`;
+        throw error;
+      }
     }
   });
   for (let i = 0; i < 150 && !existsSync(env.CHROME_OPS_CHROME_SOCKET) && !closed && !spawnError; i++) await new Promise(resolve => setTimeout(resolve, 200));
@@ -63,4 +82,5 @@ test("the Linux helper loads, reloads, reads errors from, and removes an unpacke
   assert.equal(helper("load", "relative/path").status, 1);
   assert.equal(helper("remove", id).reply.data.removed, true);
   assert.equal(helper("errors", id).status, 1, "removed extension is gone");
+  passed = true;
 });
