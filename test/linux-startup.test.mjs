@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
 for(const mode of ['protocol-error','malformed-reply','pipe-close','null-reply','no-reply','stubborn-error']) {
-  test(`Linux startup ${mode} reports failure and reaps its owned Chrome`, {skip:process.platform!=='linux',timeout:30000},async()=>{
+  test(`Linux startup ${mode} reports failure and reaps its owned Chrome`, {skip:process.platform!=='linux',timeout:30000},async t=>{
     const dir=mkdtempSync(join(tmpdir(),'chrome-ops-startup-'));
     const fixture=join(dir,'chrome.mjs'),pidFile=join(dir,'chrome.pid'),socket=join(dir,'chrome.sock');
     writeFileSync(fixture,`#!/usr/bin/env node
@@ -30,7 +30,7 @@ input.once('data',chunk=>{
     let stderr='';child.stderr.on('data',c=>stderr+=c);
     let fixturePid;
     try{
-      const [code]=await once(child,'exit');
+      const [code]=await once(child,'exit',{signal:t.signal});
       assert.notEqual(code,0,stderr);
       assert.ok(existsSync(pidFile),'fake Chrome started');fixturePid=Number(readFileSync(pidFile,'utf8'));
       let alive=true;try{process.kill(fixturePid,0);}catch(error){if(error.code==='ESRCH')alive=false;else throw error;}
