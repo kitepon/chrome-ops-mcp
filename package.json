@@ -1,6 +1,6 @@
 {
   "name": "chrome-ops-mcp",
-  "version": "0.5.3-alpha.0",
+  "version": "0.5.4-alpha.0",
   "description": "MCP server for Chrome DevTools, extension management, and browser settings via a local Chrome extension.",
   "type": "module",
   "main": "dist/index.js",
@@ -66,7 +66,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",
     "ws": "^8.21.3",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

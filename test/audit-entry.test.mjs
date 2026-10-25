@@ -7,7 +7,7 @@ function run(input,{args=[],env={}}={}){
     const child=fork('bin/audit-read.js',args,{execArgv:['--experimental-test-module-mocks','--import','./test/fixtures/audit-client-mock.mjs'],env:{...process.env,...env},stdio:['pipe','pipe','pipe','ipc']});
     let stdout='',stderr='';const calls=[];
     child.on('message',message=>calls.push(message));child.stdout.on('data',c=>stdout+=c);child.stderr.on('data',c=>stderr+=c);child.on('error',reject);
-    child.once('close',code=>{try{const json=JSON.parse(stdout);assert.deepEqual(Object.keys(json).sort(),keys);assert.ok(Date.parse(json.started_at));assert.ok(Date.parse(json.finished_at));assert.equal(json.entry_version,'0.5.3-alpha.0');resolve({code,json,stdout,stderr,calls});}catch(e){e.message+=` (child exit ${code}; stderr: ${stderr})`;reject(e);}});
+    child.once('close',code=>{try{const json=JSON.parse(stdout);assert.deepEqual(Object.keys(json).sort(),keys);assert.ok(Date.parse(json.started_at));assert.ok(Date.parse(json.finished_at));assert.equal(json.entry_version,'0.5.4-alpha.0');resolve({code,json,stdout,stderr,calls});}catch(e){e.message+=` (child exit ${code}; stderr: ${stderr})`;reject(e);}});
     child.stdin.end(input);
   });
 }
