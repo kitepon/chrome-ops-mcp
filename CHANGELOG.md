@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Reap the Linux supervisor’s owned Chrome on startup failure, reject pending
+  DevTools requests when its pipe ends, and close owned control sockets on exit.
+  Keep the existing 15-second command deadline and report failures as failures.
+
 ## 0.5.4-alpha.0
 
 - Update body-parser, fast-uri, ip-address, and Zod to patched releases and
