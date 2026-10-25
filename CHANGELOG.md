@@ -5,6 +5,8 @@
 - Reap the Linux supervisor’s owned Chrome on startup failure, reject pending
   DevTools requests when its pipe ends, and close owned control sockets on exit.
   Keep the existing 15-second command deadline and report failures as failures.
+- Release DevTools streams and leave replacement files or sockets untouched after
+  the original server has closed its Unix socket.
 
 ## 0.5.4-alpha.0
 

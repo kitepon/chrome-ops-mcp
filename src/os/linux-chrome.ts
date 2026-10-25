@@ -17,11 +17,13 @@ class DevTools {
     this.closed = error;
     for (const waiter of this.waiting.values()) { clearTimeout(waiter.timer); waiter.reject(error); }
     this.waiting.clear();
+    this.input.destroy();
+    this.output.destroy();
   }
   private next = 1;
   private buffer = "";
   private waiting = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
-  constructor(private input: Writable, output: Readable) {
+  constructor(private input: Writable, private output: Readable) {
     input.on("error", error => this.close(error));
     output.on("error", error => this.close(error));
     output.on("end", () => this.close(new Error("Chrome DevTools pipe ended")));
@@ -149,7 +151,6 @@ async function main() {
   const stop = () => { stopping = true; chrome.kill("SIGTERM"); };
   for (const signal of ["SIGTERM", "SIGINT"] as const) process.on(signal, stop);
   let server: ReturnType<typeof createServer> | undefined;
-  let ownsSocket = false;
   let serverError: Error | undefined;
   const clients = new Set<Socket>();
 
@@ -179,8 +180,7 @@ async function main() {
     await new Promise<void>((resolve, reject) => {
       server!.once("error", reject);
       server!.listen(path, () => {
-        ownsSocket = true;
-        try { chmodSync(path, 0o600); resolve(); } catch (error) { reject(error); }
+          try { chmodSync(path, 0o600); resolve(); } catch (error) { reject(error); }
       });
     });
     console.error(`Chrome Ops development Chrome ready: ${path}`);
@@ -199,7 +199,7 @@ async function main() {
     forceStop.unref();
     await finished;
     clearTimeout(forceStop);
-    if (ownsSocket) rmSync(path, { force: true });
+    // server.close releases its socket; the path may already belong to a replacement.
   }
 }
 
