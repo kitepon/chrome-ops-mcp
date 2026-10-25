@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.4-alpha.0
+
+- Update body-parser, fast-uri, ip-address, and Zod to patched releases and
+  raise the declared Zod minimum to 4.6.7. Keep the MCP transport, tools,
+  Host access restrictions, and audit service permissions unchanged.
+
 ## 0.5.3-alpha.0
 
 - Read Cloud project rows behind the collapsed No organization branch by allowing
