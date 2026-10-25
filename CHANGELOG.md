@@ -7,6 +7,9 @@
   Keep the existing 15-second command deadline and report failures as failures.
 - Release DevTools streams and leave replacement files or sockets untouched after
   the original server has closed its Unix socket.
+- Run the Windows Host logon task without opening a console window, preserving
+  task lifetime, child exit codes, restart policy, and startup failure diagnostics.
+  Existing installations migrate through the normal setup command.
 
 ## 0.5.4-alpha.0
 

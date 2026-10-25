@@ -1,6 +1,6 @@
 // Windows: the Host runs as a logon Scheduled Task and the PowerShell 7 helper drives chrome://extensions.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { root, waitFor } from "../lib/host-client.mjs";
 import { check, spawn } from "../lib/process.mjs";
@@ -8,6 +8,7 @@ import { check, spawn } from "../lib/process.mjs";
 const taskName = "Chrome Ops Host";
 const taskDescription = "Persistent local host for Chrome Ops MCP";
 const host = resolve(root, "dist/host.js");
+const launcher = resolve(root, "scripts/os/windows-host-launcher.cs");
 const helper = resolve(root, "helper/windows/chrome-ops-helper.ps1");
 
 // Values travel as environment variables so PowerShell never has to parse them as code.
@@ -25,14 +26,42 @@ function listeningPids(port) {
 }
 
 function readTask() {
-  return powershell("$t=Get-ScheduledTask -TaskName $env:CO_TASK -ErrorAction SilentlyContinue;if(-not $t){'null'}else{[pscustomobject]@{state=[string]$t.State;description=$t.Description;execute=$t.Actions[0].Execute;arguments=$t.Actions[0].Arguments;workingDirectory=$t.Actions[0].WorkingDirectory}|ConvertTo-Json -Compress}",
+  return powershell("$t=Get-ScheduledTask -TaskName $env:CO_TASK -ErrorAction SilentlyContinue;if(-not $t){'null'}else{$i=Get-ScheduledTaskInfo -TaskName $env:CO_TASK;[pscustomobject]@{state=[string]$t.State;lastTaskResult=$i.LastTaskResult;description=$t.Description;execute=$t.Actions[0].Execute;arguments=$t.Actions[0].Arguments;workingDirectory=$t.Actions[0].WorkingDirectory}|ConvertTo-Json -Compress}",
     { CO_TASK: taskName });
 }
 
-// The build hash rides on the command line so a changed Host build changes the task definition.
+// Compile a GUI-subsystem supervisor with the Windows .NET Framework compiler.
+// Each source version has its own path so a running executable is never overwritten.
+function backgroundLauncher() {
+  const sourceHash = createHash("sha256").update(readFileSync(launcher)).digest("hex");
+  const directory = resolve(windows.stateDir, "bin");
+  const execute = resolve(directory, `host-launcher-${sourceHash}.exe`);
+  if (existsSync(execute)) return execute;
+  const compiler = resolve(process.env.SystemRoot ?? "C:\\Windows", "Microsoft.NET/Framework64/v4.0.30319/csc.exe");
+  if (!existsSync(compiler)) throw new Error("The Windows .NET Framework C# compiler is required for the background Host launcher");
+  mkdirSync(directory, { recursive: true });
+  const temporary = mkdtempSync(resolve(directory, "build-"));
+  try {
+    const output = resolve(temporary, "host-launcher.exe");
+    check(spawn(compiler, ["/nologo", "/target:winexe", `/out:${output}`, launcher]), "Host launcher compilation");
+    // A concurrent setup may have compiled the identical source first.
+    if (!existsSync(execute)) {
+      try { renameSync(output, execute); }
+      catch (error) {
+        // Windows cannot replace an executable that the other setup already started.
+        if (!["EEXIST", "EPERM"].includes(error.code) || !existsSync(execute)) throw error;
+      }
+    }
+    return execute;
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+// Either a Host or launcher update must replace the task and restart its process tree.
 function desiredTask() {
   const hostBuild = createHash("sha256").update(readFileSync(host)).digest("hex");
-  return { execute: process.execPath, arguments: `"${host}" --build=${hostBuild}`, workingDirectory: root };
+  return { execute: backgroundLauncher(), arguments: `"${process.execPath}" "${host}" --build=${hostBuild}`, workingDirectory: root };
 }
 
 function registerTask(task) {
@@ -116,7 +145,8 @@ export const windows = {
     const task = readTask();
     const ports = { chrome: listeningPids(32145), clients: listeningPids(32146) };
     return { ok: task?.state === "Running" && ports.chrome.length === 1 && ports.clients.length === 1,
-      kind: "scheduled-task", name: taskName, exists: task !== null, state: task?.state ?? null, ports };
+      kind: "scheduled-task", name: taskName, exists: task !== null, state: task?.state ?? null,
+      lastTaskResult: task?.lastTaskResult ?? null, ports };
   },
 
   developerOperations() {

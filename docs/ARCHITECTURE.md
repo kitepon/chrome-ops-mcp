@@ -60,6 +60,7 @@ Shared code, OS adaptation, and harness adaptation are separated at the file lev
   - `name`, `stateDir` (backups), `exec(program, args)` (runs a harness CLI), `prepare()`,
   - `installService()` → `{ changed, service }` (idempotent, rolls back on failure), `uninstallService()`, `serviceStatus()`,
   - `developerOperations()` (doctor), `nativeBridgeUpdate(id, activeTabHashes)` or `null`.
+- Windows `os/windows-host-launcher.cs` is compiled as a GUI application into the per-user state directory. It starts Node with `CREATE_NO_WINDOW` and atomically assigns the child to a kill-on-close Job Object at creation. The scheduled task supervises the launcher; stopping the task ends the Host and its descendants, and normal completion propagates the Host exit code. No shell reparses the executable or entry-point paths.
 - Harness: `harness/claude.mjs`, `harness/codex.mjs`, `harness/cursor.mjs`, `harness/grok.mjs`. See `docs/CLIENTS.md`.
 
 `test/adapters.test.mjs` checks that every OS and harness adapter fills the same contract.

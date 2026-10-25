@@ -17,7 +17,7 @@ Network event observations are redacted before they cross the extension boundary
 | | Host service | Unpacked-extension developer operations |
 | --- | --- | --- |
 | macOS | LaunchAgent | Swift helper (Accessibility) |
-| Windows 11 | logon Scheduled Task | PowerShell 7 helper (UI Automation) |
+| Windows 11 | logon Scheduled Task without a console window | PowerShell 7 helper (UI Automation) |
 | Linux (systemd) | systemd user service | Chrome Ops' own development Chrome (DevTools pipe) |
 
 Claude Code, Codex, Cursor, and Grok Build are registered the same way on every OS.
@@ -51,6 +51,8 @@ npm run doctor
 Registration backs up the harness configuration before a change and refuses to replace a different `chrome-ops` entry. Restart or reload the harness if it does not discover the new server immediately. `npm run doctor` reports the Host service, the Bridge connection, developer-operation readiness, and the registration state of each harness. `npm run uninstall` stops and removes the Host service (and on Linux the development Chrome service and launcher); it leaves the Bridge extension, the Linux development Chrome profile, and harness registrations in place.
 
 Registrations point at the absolute path of the current Node executable and of `dist/index.js` in this checkout. Homebrew Node uses the formula's stable `opt` path. Moving the checkout or changing Node installations requires registering again.
+
+On Windows, the Host task uses the GUI launcher built with Windows’ .NET Framework C# compiler to start Node without a console window. The launcher creates no console, waits for the Host, and uses a Windows Job Object to end the Host when the task stops. It preserves the Host exit status; `npm run doctor` reports `lastTaskResult`. Launcher failures are recorded in `%LOCALAPPDATA%\ChromeOps\host-launcher.log`. Re-run `npm run setup` to migrate an older task.
 
 Logs: macOS writes the Host log to `~/Library/Logs/ChromeOps/`; Linux uses `journalctl --user -u chrome-ops-host` and `journalctl --user -u chrome-ops-chrome`. Backups of harness configuration go to `~/Library/Application Support/ChromeOps/backups` (macOS), `%LOCALAPPDATA%\ChromeOps\backups` (Windows), or `${XDG_STATE_HOME:-~/.local/state}/chrome-ops/backups` (Linux).
 

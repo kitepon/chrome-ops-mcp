@@ -49,7 +49,7 @@
     "test": "npm run build",
     "test:smoke": "node test/smoke.mjs",
     "test:devtools": "node test/devtools-smoke.mjs",
-    "test:unit": "node --experimental-test-module-mocks --test test/adapters.test.mjs test/redaction.test.mjs test/remove.test.mjs test/host-profiles.test.mjs test/host-origin.test.mjs test/prepare-page.test.mjs test/load.test.mjs test/node-command.test.mjs test/linux-chrome.test.mjs test/audit-read.test.mjs test/audit-entry.test.mjs test/audit-chrome.test.mjs test/mcp-contract.test.mjs test/linux-startup-observer.test.mjs test/linux-startup.test.mjs test/linux-socket-ownership.test.mjs"
+    "test:unit": "node --experimental-test-module-mocks --test test/adapters.test.mjs test/redaction.test.mjs test/remove.test.mjs test/host-profiles.test.mjs test/host-origin.test.mjs test/prepare-page.test.mjs test/load.test.mjs test/node-command.test.mjs test/linux-chrome.test.mjs test/audit-read.test.mjs test/audit-entry.test.mjs test/audit-chrome.test.mjs test/mcp-contract.test.mjs test/linux-startup-observer.test.mjs test/linux-startup.test.mjs test/linux-socket-ownership.test.mjs test/windows-host-launcher.test.mjs"
   },
   "keywords": [
     "mcp",
