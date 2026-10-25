@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Run the Windows Host logon task without opening a console window, preserving
+  task lifetime, child exit codes, restart policy, and startup failure diagnostics.
+  Existing installations migrate through the normal setup command.
+
 ## 0.5.4-alpha.0
 
 - Update body-parser, fast-uri, ip-address, and Zod to patched releases and
