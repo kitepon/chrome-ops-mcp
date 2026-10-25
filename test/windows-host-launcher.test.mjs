@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,7 +39,11 @@ test("Windows background launcher preserves paths, failures and task-owned proce
     const result = spawnSync(launcher, [process.execPath, entry, build], { cwd: dir, windowsHide: true, timeout: 10000 });
     assert.ifError(result.error);
     assert.equal(result.status, 23, "launcher must wait for and return the child's failure");
-    assert.deepEqual(JSON.parse(readFileSync(receipt, "utf8")), { cwd: dir, args: [build] });
+    const observed = JSON.parse(readFileSync(receipt, "utf8"));
+    // Windows may expand a TEMP directory's 8.3 alias in process.cwd(). Compare
+    // the actual directory, while retaining exact argument and literal-path checks.
+    assert.equal(realpathSync.native(observed.cwd), realpathSync.native(dir));
+    assert.deepEqual(observed.args, [build]);
     writeFileSync(entry, "process.exit(0);\n");
     const success = spawnSync(launcher, [process.execPath, entry, build], { windowsHide: true, timeout: 10000 });
     assert.ifError(success.error);
