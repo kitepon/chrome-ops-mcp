@@ -1,7 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.5.5-alpha.0
 
+- Update the locked hono (4.13.21) and @hono/node-server (2.1.11) to patched releases.
+  No manifest range, tool or access rule changes.
+- Read the Google account in the audit entry from open shadow roots, so the Cloud
+  console's new top bar no longer stops `google-cloud-projects` with
+  `account_unknown`. Closed roots, zero or several accounts still stop.
 - Reap the Linux supervisor’s owned Chrome on startup failure, reject pending
   DevTools requests when its pipe ends, and close owned control sockets on exit.
   Keep the existing 15-second command deadline and report failures as failures.

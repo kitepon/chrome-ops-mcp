@@ -48,6 +48,8 @@ function fixture(options = {}) {
         if(options.exception)return {exceptionDetails:{text:'SECRET'}};
         const service=Object.keys(urls).find(key=>urls[key]===tabs.get(target.tabId).url);
         const {document}=parseHTML(options.html ?? auditPage(service, options.count ?? 1));
+        // linkedom has no shadow DOM: attach the synthetic open root by hand.
+        if(options.shadowHtml)Object.defineProperty(document.querySelector('[data-shadow-host]'),'shadowRoot',{value:parseHTML(options.shadowHtml).document});
         for(const input of document.querySelectorAll('input, textarea'))Object.defineProperty(input,'value',{get(){throw Error('Input values must not be read');}});
         for(const button of document.querySelectorAll('button'))button.addEventListener('click',()=>{calls.push(['ui-click',button.id]);options.clicked?.(button.id);});
         const location=new URL(options.documentUrl ?? tabs.get(target.tabId).url);
@@ -218,4 +220,15 @@ test('Cloud account changes after expansion stop before returning any project',a
  let f;f=fixture({html:cloudCollapsedPage(),clicked(){f.options.html=cloudCollapsedPage({expanded:true}).replace('Audit@EXAMPLE.test','other@example.test');}});
  const r=await f.read('google-cloud-projects');assert.equal(r.status,'stopped');assert.equal(r.stop_reason,'account_unknown');assert.equal(r.account,null);assert.equal(r.items.length,0);
  assert.equal(f.calls.filter(c=>c[0]==='ui-click').length,1);assert.deepEqual([...f.tabs.keys()],[1]);assert.ok(!JSON.stringify(r).includes('other@example.test'));
+});
+
+test('Cloud account chooser inside an open shadow root is read; the same bar without one still stops',async()=>{
+ const bar='<div data-shadow-host></div>',chooser='<div><cfc-account-chooser><button aria-label="アカウント: Audit (Audit@EXAMPLE.test)"></button></cfc-account-chooser></div>';
+ const page=cloudCollapsedPage({expanded:true}).replace(googleAccount,bar);
+ const ok=await fixture({html:page,shadowHtml:chooser}).read('google-cloud-projects');
+ assert.equal(ok.status,'ok');assert.equal(ok.account.email_sha256,createHash('sha256').update('audit@example.test').digest('hex'));assert.equal(ok.item_count,1);
+ const closed=await fixture({html:page}).read('google-cloud-projects');
+ assert.equal(closed.status,'stopped');assert.equal(closed.stop_reason,'account_unknown');assert.equal(closed.items.length,0);
+ const two=await fixture({html:page.replace('</main>','</main>'+googleAccount.replace('Audit@EXAMPLE','other@EXAMPLE')),shadowHtml:chooser}).read('google-cloud-projects');
+ assert.equal(two.stop_reason,'account_unknown');
 });
