@@ -2,6 +2,8 @@
 
 ## 0.5.5-alpha.0
 
+- Update the locked hono (4.13.21) and @hono/node-server (2.1.11) to patched releases.
+  No manifest range, tool or access rule changes.
 - Read the Google account in the audit entry from open shadow roots, so the Cloud
   console's new top bar no longer stops `google-cloud-projects` with
   `account_unknown`. Closed roots, zero or several accounts still stop.
