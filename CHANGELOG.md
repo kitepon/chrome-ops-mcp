@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.5-alpha.0
 
 - Read the Google account in the audit entry from open shadow roots, so the Cloud
   console's new top bar no longer stops `google-cloud-projects` with
