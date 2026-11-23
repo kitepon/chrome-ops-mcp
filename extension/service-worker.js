@@ -54,7 +54,15 @@ function auditProject(service, allowCloudExpansion = false, cloudAccount = null)
   });
   let account = null;
   if (service.startsWith("google-")) {
-    const buttons = document.querySelectorAll('[aria-label^="Google Account"], [aria-label^="Google アカウント"], cfc-account-chooser button[aria-label]');
+    // The Cloud console now draws its top bar (with the account chooser) inside an
+    // open shadow root, which a plain querySelectorAll never enters. Walk visible
+    // open roots; closed roots stay unreadable and fall through to account_unknown.
+    const buttons = [];
+    const collect = root => {
+      buttons.push(...root.querySelectorAll('[aria-label^="Google Account"], [aria-label^="Google アカウント"], cfc-account-chooser button[aria-label]'));
+      for (const host of root.querySelectorAll("*")) if (host.shadowRoot && visible(host)) collect(host.shadowRoot);
+    };
+    collect(document);
     const emails = new Set([...buttons].filter(visible).map(button => label(button)?.match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/)?.[0]?.toLowerCase()).filter(Boolean));
     if (emails.size !== 1) return stopped("account_unknown");
     account = { email:[...emails][0] };

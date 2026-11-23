@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Read the Google account in the audit entry from open shadow roots, so the Cloud
+  console's new top bar no longer stops `google-cloud-projects` with
+  `account_unknown`. Closed roots, zero or several accounts still stop.
 - Reap the Linux supervisor’s owned Chrome on startup failure, reject pending
   DevTools requests when its pipe ends, and close owned control sockets on exit.
   Keep the existing 15-second command deadline and report failures as failures.
